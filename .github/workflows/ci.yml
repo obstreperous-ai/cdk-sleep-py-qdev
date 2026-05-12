@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12']
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+
+    - name: Install Node.js for CDK
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install AWS CDK CLI
+      run: npm install -g aws-cdk
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements-dev.txt
+
+    - name: Run pytest
+      run: |
+        pytest tests/ -v --cov=cdk_base --cov-report=term-missing
+
+    - name: Run CDK synth
+      run: |
+        cdk synth
+
+    - name: Run CDK diff (mock)
+      run: |
+        # CDK diff requires AWS credentials and a deployed stack
+        # For CI, we validate the synth output instead
+        cdk synth > /dev/null && echo "CDK synth successful - diff would run against deployed stack"
+
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install linting dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+
+    - name: Run linting checks
+      run: echo "Linting checks can be added here (black, flake8, mypy)"
