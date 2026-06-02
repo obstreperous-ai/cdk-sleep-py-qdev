@@ -561,23 +561,69 @@ cdk-sleep-py-qdev/
 ### Stack Components
 
 #### CdkBaseStack
-**Status**: Initial/Empty
+**Status**: Foundational Infrastructure Implemented (Issue #3)
 **Purpose**: Main CDK stack that will contain all infrastructure components
 **Location**: `cdk_base/cdk_base_stack.py`
 
-**Current State**:
-- Empty stack with no resources
-- Ready for TDD-driven resource addition
+**Implemented Components** (via TDD - Issue #3):
 
-**Planned Components** (to be added via TDD):
-- S3 buckets for audio storage (input/output)
-- EventBridge rule for event detection
-- Step Functions state machine for orchestration
+1. **Input S3 Bucket** (`SleepAudioInputBucket`) ✅
+   - **Status**: Implemented
+   - **Purpose**: Receives raw audio files (`.mp3`, `.wav`, `.flac`) and text files (`.txt`) from users
+   - **Configuration**:
+     - Encryption: S3-managed (AES256)
+     - Versioning: Enabled
+     - Public Access: Blocked (all public access blocked)
+     - EventBridge Integration: Enabled (sends Object Created events)
+     - SSL/TLS: Enforced via bucket policies
+     - Removal Policy: RETAIN (protects production data from accidental deletion)
+   - **Event Flow**: File uploads automatically trigger EventBridge notifications
+
+2. **Output S3 Bucket** (`SleepAudioOutputBucket`) ✅
+   - **Status**: Implemented
+   - **Purpose**: Stores processed and enhanced audio files
+   - **Configuration**:
+     - Encryption: S3-managed (AES256)
+     - Versioning: Enabled
+     - Public Access: Blocked (all public access blocked)
+     - SSL/TLS: Enforced via bucket policies
+     - Removal Policy: RETAIN (protects production data from accidental deletion)
+   - **Access Pattern**: Pre-signed URLs will be generated for secure downloads (future enhancement)
+
+3. **EventBridge Rule** (`SleepAudioInputRule`) ✅
+   - **Status**: Implemented
+   - **Purpose**: Detects new file uploads to Input Bucket and triggers processing workflow
+   - **Configuration**:
+     - Event Source: `aws.s3`
+     - Event Type: `Object Created`
+     - Filter: Only events from the Input Bucket (by bucket name)
+     - State: Enabled
+   - **Current Target**: CloudWatch Logs (placeholder for testing)
+   - **Future Target**: Step Functions state machine (Issue #4)
+   - **Event Pattern**:
+     ```json
+     {
+       "source": ["aws.s3"],
+       "detail-type": ["Object Created"],
+       "detail": {
+         "bucket": {
+           "name": ["<input-bucket-name>"]
+         }
+       }
+     }
+     ```
+
+4. **CloudWatch Log Group** (`SleepAudioEventLogGroup`) ✅
+   - **Status**: Implemented (placeholder)
+   - **Purpose**: Temporary target for EventBridge rule to validate event flow
+   - **Location**: `/aws/events/sleep-audio-pipeline`
+   - **Note**: This is a placeholder that will be replaced by Step Functions in Issue #4
+
+**Pending Components** (to be added in future issues):
+- Step Functions state machine for orchestration (Issue #4)
 - Lambda functions for audio processing (validate, polly, bedrock)
 - DynamoDB table for metadata
 - SNS topics for notifications (success/error)
-- IAM roles and policies (least privilege)
-- KMS keys for encryption
 - CloudWatch log groups and alarms
 
 ### Testing Strategy
@@ -590,5 +636,39 @@ cdk-sleep-py-qdev/
 6. **Security Tests**: IAM policy validation, encryption verification
 
 ### Change Log
-- **Initial Setup**: Created base TDD infrastructure with CI/CD pipeline
+
+#### Issue #1: Initial Setup
+- Created base TDD infrastructure with CI/CD pipeline
+- Set up pytest testing framework with aws-cdk assertions
+- Configured GitHub Actions workflow for automated testing
+- Established project structure following Python CDK best practices
+
+#### Issue #2: Architecture Documentation
 - **Issue #2**: Comprehensive architecture documentation and Mermaid diagram for Event-Driven Sleep Audio Pipeline
+- Created detailed Mermaid diagram showing complete system architecture
+- Documented all AWS services and their rationale
+- Defined security considerations and best practices
+- Established multi-environment support strategy
+- Outlined future extensibility and scalability considerations
+
+#### Issue #3: Foundational Infrastructure (TDD Implementation) ✅
+**Date**: Current Release
+**Approach**: Strict Test-Driven Development (Red-Green-Refactor)
+
+**Changes Made**:
+1. **Test Phase (Red)**:
+   - Added comprehensive CDK assertion tests for S3 buckets (input/output)
+   - Added tests for EventBridge rule configuration and event patterns
+   - Tests verify encryption, versioning, public access blocking, and event notifications
+   - All tests initially failed (as expected in TDD)
+
+2. **Implementation Phase (Green)**:
+   - Implemented `SleepAudioInputBucket` with S3-managed encryption, versioning, and EventBridge integration
+   - Implemented `SleepAudioOutputBucket` with matching security configuration
+   - Implemented `SleepAudioInputRule` (EventBridge) to detect Object Created events
+   - Added CloudWatch Log Group as placeholder target for event rule
+   - All tests now pass
+
+3. **Documentation Update**:
+   - Updated ARCHITECTURE.md to reflect implemented components
+   - Marked Input/Output buckets and EventBridge rule as implemented (✅)
