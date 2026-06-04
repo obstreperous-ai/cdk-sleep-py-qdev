@@ -1,6 +1,7 @@
 from aws_cdk import (
     Stack,
     aws_s3 as s3,
+    aws_dynamodb as dynamodb,
     aws_events as events,
     aws_events_targets as targets,
     aws_logs as logs,
@@ -53,8 +54,26 @@ class CdkBaseStack(Stack):
         )
         
         # EventBridge Rule - triggers on S3 Object Created events
-        # ====================================================================
         # Issue #4: Step Functions State Machine with Polly Integration
+        # Issue #5: DynamoDB Table for Audio Pipeline Metadata
+        # ====================================================================
+        
+        # DynamoDB Table - stores metadata for audio processing pipeline
+        self.metadata_table = dynamodb.Table(
+            self,
+            "SleepAudioMetadataTable",
+            table_name="SleepAudioMetadataTable",
+            partition_key=dynamodb.Attribute(
+                name="audioId",
+                type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,  # On-demand billing
+            encryption=dynamodb.TableEncryption.AWS_MANAGED,  # Server-side encryption
+            point_in_time_recovery=True,  # Enable backup for data protection
+            removal_policy=RemovalPolicy.DESTROY,  # For dev/test - change to RETAIN for prod
+        )
+        
+        # ====================================================================
         # ====================================================================
         
         # CloudWatch Log Group for Step Functions state machine
@@ -66,6 +85,33 @@ class CdkBaseStack(Stack):
         )
         
         # Define the Polly task - minimal placeholder for text-to-speech synthesis
+        # Define DynamoDB PutItem task - writes initial metadata record
+        # This captures the S3 event data and creates a tracking record
+        put_metadata_task = tasks.DynamoPutItem(
+            self,
+            "PutInitialMetadata",
+            table=self.metadata_table,
+            item={
+                "audioId": tasks.DynamoAttributeValue.from_string(
+                    sfn.JsonPath.string_at("$.detail.object.key")
+                ),
+                "status": tasks.DynamoAttributeValue.from_string("PROCESSING"),
+                "inputBucket": tasks.DynamoAttributeValue.from_string(
+                    sfn.JsonPath.string_at("$.detail.bucket.name")
+                ),
+                "inputKey": tasks.DynamoAttributeValue.from_string(
+                    sfn.JsonPath.string_at("$.detail.object.key")
+                ),
+                "createdAt": tasks.DynamoAttributeValue.from_string(
+                    sfn.JsonPath.string_at("$$.State.EnteredTime")
+                ),
+                "updatedAt": tasks.DynamoAttributeValue.from_string(
+                    sfn.JsonPath.string_at("$$.State.EnteredTime")
+                ),
+            },
+            result_path="$.dynamoResult",
+        )
+        
         # This uses StartSpeechSynthesisTask for async processing
         polly_task = tasks.CallAwsService(
             self,
@@ -86,9 +132,9 @@ class CdkBaseStack(Stack):
         )
         
         # Define the state machine with Polly task
-        # Simple flow: Start → Polly Task → End
-        state_machine_definition = polly_task
-        
+        # Define the state machine workflow
+        # Flow: Start → DynamoDB PutItem (initial record) → Polly Task → End
+        state_machine_definition = put_metadata_task.next(polly_task)
         # Create the state machine
         state_machine = sfn.StateMachine(
             self,
@@ -112,6 +158,10 @@ class CdkBaseStack(Stack):
         self.input_bucket.grant_read(state_machine)
         
         # Add explicit Polly permissions to the state machine role
+        # Grant the state machine permissions to write to DynamoDB table
+        # Allows tracking of audio processing metadata
+        self.metadata_table.grant_write_data(state_machine)
+        
         # Least privilege: only allow starting synthesis tasks
         state_machine.add_to_role_policy(
             iam.PolicyStatement(
@@ -128,6 +178,7 @@ class CdkBaseStack(Stack):
         # ====================================================================
         # EventBridge Rule - Wiring to Step Functions
         # ====================================================================
+        # EventBridge Rule - triggers on S3 Object Created events
         
         event_rule = events.Rule(
             self,

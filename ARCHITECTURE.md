@@ -602,14 +602,45 @@ cdk-sleep-py-qdev/
    - **Removal Policy**: DESTROY (safe to delete logs in dev/test)
 
 **Pending Components** (to be added in future issues):
+7. **DynamoDB Table for Metadata** (`SleepAudioMetadataTable`) ✅
+   - **Status**: Implemented (Issue #5)
+   - **Purpose**: Stores metadata for all audio files processed through the pipeline
+   - **Configuration**:
+     - **Partition Key**: `audioId` (String) - Uses S3 object key as unique identifier
+     - **Billing Mode**: PAY_PER_REQUEST (on-demand)
+     - **Encryption**: AWS-managed server-side encryption enabled
+     - **Point-in-Time Recovery**: Enabled for data protection
+     - **Removal Policy**: DESTROY (safe for dev/test environments)
+   - **Initial Attributes Tracked**:
+     - `audioId`: Primary key, S3 object key
+     - `status`: Processing status (PROCESSING, COMPLETED, FAILED)
+     - `inputBucket`: Name of S3 bucket containing input file
+     - `inputKey`: S3 object key of input file
+     - `createdAt`: Timestamp when record was created (from state machine execution time)
+     - `updatedAt`: Timestamp when record was last updated
+   - **State Machine Integration**:
+     - DynamoDB PutItem task writes initial record at start of workflow
+     - Captures S3 event data (bucket, object key) from EventBridge
+     - Sets initial status to "PROCESSING"
+     - Uses Step Functions JsonPath to extract data from S3 event
+     - Records state machine execution start time
+   - **IAM Permissions**:
+     - State machine role has `dynamodb:PutItem` and `dynamodb:UpdateItem` permissions
+     - Granted via `grant_write_data()` for least-privilege access
+   - **Future Enhancements**:
+     - Add UpdateItem task to set status to COMPLETED/FAILED
+     - Add more attributes (file size, duration, Polly voice, error messages)
+     - Add Global Secondary Index on status for operational queries
+     - Add DynamoDB Streams for real-time analytics
+
 - Lambda functions for audio processing (validate, bedrock)
 - DynamoDB table for metadata (Issue #5)
-- SNS topics for notifications (success/error)
-- CloudWatch alarms and dashboards
+- SNS topics for notifications (success/error) - **Issue #6**
+- Error handling and retry logic in state machine - **Issue #6**
 - Error handling and retry logic in state machine
-- Additional Polly configuration (SSML support, voice selection)
 - Bedrock integration for AI enhancement
 
+- Status update tasks in state machine (COMPLETED/FAILED)
 ### Testing Strategy
 
 1. **Unit Tests**: Test individual CDK constructs using `aws_cdk.assertions`
