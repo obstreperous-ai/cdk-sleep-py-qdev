@@ -30,71 +30,41 @@ flowchart TD
     InputBucket -->|S3 Event: Object Created| EventBridge[⚡ EventBridge Rule<br/>Detect New Uploads<br/>Filter: .mp3, .wav, .txt]
     
     %% Orchestration
-    EventBridge -->|Trigger| StepFunctions[🔄 Step Functions<br/>Audio Processing Workflow<br/>Orchestration & Error Handling]
+    EventBridge -->|Trigger| StepFunctions[🔄 Step Functions State Machine<br/>SleepAudioPipelineStateMachine<br/>Orchestration & Logging]
     
-    %% Processing Tasks
-    StepFunctions -->|Task 1: Validate| ValidateLambda[λ Validate Lambda<br/>Check file format<br/>Extract metadata<br/>Virus scan]
+    %% Current Processing Task (Issue #4)
+    StepFunctions -->|Polly Task| PollyTask[🗣️ Amazon Polly Task<br/>StartSpeechSynthesisTask<br/>Neural Voice: Joanna]
     
-    ValidateLambda -->|Valid File| StepFunctions
-    ValidateLambda -->|Invalid| ErrorHandler[❌ Error Handler<br/>Log & Notify]
+    PollyTask -->|Async Processing| Polly[🗣️ Amazon Polly Service<br/>Text-to-Speech<br/>Output to S3]
     
-    StepFunctions -->|Task 2: Process Text| PollyLambda[λ Polly Lambda<br/>Text-to-Speech<br/>Soothing Voice Generation]
+    Polly -->|Save Audio| OutputBucket[📦 S3 Output Bucket<br/>Processed Audio<br/>Versioning Enabled]
     
-    PollyLambda -->|Invoke| Polly[🗣️ Amazon Polly<br/>Neural TTS<br/>Multiple Voices]
-    Polly -->|Audio Stream| PollyLambda
+    %% Future Processing Tasks (Placeholder)
+    StepFunctions -.->|Future: Validate| ValidateLambda[λ Validate Lambda<br/>Coming in Issue #5]
     
-    StepFunctions -->|Task 3: AI Enhancement| BedrockLambda[λ Bedrock Lambda<br/>AI Audio Enhancement<br/>Sleep Sound Generation]
+    StepFunctions -.->|Future: AI Enhance| BedrockLambda[λ Bedrock Lambda<br/>Coming in Future Issues]
     
-    BedrockLambda -->|Invoke| Bedrock[🤖 Amazon Bedrock<br/>AI Models<br/>Audio Enhancement]
-    Bedrock -->|Enhanced Audio| BedrockLambda
-    
-    %% Metadata & Storage
-    ValidateLambda -->|Store Metadata| DynamoDB[(🗄️ DynamoDB Table<br/>Audio Metadata<br/>user_id, duration<br/>status, timestamps)]
-    PollyLambda -->|Update Status| DynamoDB
-    BedrockLambda -->|Update Status| DynamoDB
-    
-    %% Output Storage
-    PollyLambda -->|Save Processed Audio| OutputBucket[📦 S3 Output Bucket<br/>Processed Audio<br/>Versioning + Lifecycle]
-    BedrockLambda -->|Save Enhanced Audio| OutputBucket
-    
-    %% Completion Flow
-    StepFunctions -->|Success| SuccessSNS[📬 SNS Success Topic<br/>Processing Complete<br/>Delivery Notifications]
-    ErrorHandler -->|Failure| ErrorSNS[📬 SNS Error Topic<br/>Processing Failed<br/>Alert Operations]
-    
-    SuccessSNS -->|Email/SMS| User
-    ErrorSNS -->|Alert| Ops[👨‍💼 Operations Team]
+    %% Future Components (Placeholder)
+    StepFunctions -.->|Future: Metadata| DynamoDB[(🗄️ DynamoDB Table<br/>Coming in Issue #5)]
     
     %% Observability
-    ValidateLambda -.->|Logs & Metrics| CloudWatch[📊 CloudWatch<br/>Logs, Metrics, Alarms<br/>X-Ray Tracing]
-    PollyLambda -.->|Logs & Metrics| CloudWatch
-    BedrockLambda -.->|Logs & Metrics| CloudWatch
-    StepFunctions -.->|Execution Logs| CloudWatch
-    
-    CloudWatch -->|Alarm| ErrorSNS
-    
-    %% Security Layer
-    subgraph Security[🔒 Security Layer]
-        IAM[IAM Roles<br/>Least Privilege<br/>Per-Function Policies]
-        KMS[KMS Keys<br/>Encryption at Rest<br/>S3, DynamoDB, SNS]
-        VPC[VPC Integration<br/>Optional Private Subnets<br/>VPC Endpoints]
-    end
+    StepFunctions -->|Execution Logs| CloudWatch[📊 CloudWatch<br/>State Machine Logs<br/>X-Ray Tracing Enabled]
+    EventBridge -->|Debug Events| CloudWatch
     
     %% Styling
     classDef storage fill:#FF9999,stroke:#CC0000,stroke-width:2px,color:#000
     classDef compute fill:#99CCFF,stroke:#0066CC,stroke-width:2px,color:#000
     classDef ai fill:#CC99FF,stroke:#6600CC,stroke-width:2px,color:#000
     classDef event fill:#FFCC99,stroke:#FF6600,stroke-width:2px,color:#000
-    classDef notification fill:#99FF99,stroke:#00CC00,stroke-width:2px,color:#000
     classDef monitoring fill:#FFFF99,stroke:#CCCC00,stroke-width:2px,color:#000
-    classDef security fill:#CCCCCC,stroke:#666666,stroke-width:2px,color:#000
+    classDef future fill:#DDDDDD,stroke:#999999,stroke-width:1px,color:#666,stroke-dasharray: 5 5
     
     class InputBucket,OutputBucket,DynamoDB storage
-    class ValidateLambda,PollyLambda,BedrockLambda,StepFunctions compute
-    class Polly,Bedrock ai
+    class StepFunctions,PollyTask compute
+    class Polly ai
     class EventBridge event
-    class SuccessSNS,ErrorSNS notification
     class CloudWatch monitoring
-    class Security security
+    class ValidateLambda,BedrockLambda,DynamoDB future
 ```
 
 ### Data Flow Explanation
@@ -121,55 +91,40 @@ flowchart TD
   ```
 - **Target**: Step Functions state machine execution with event details as input
 
-#### 3. Orchestration (Step Functions)
-The Step Functions state machine orchestrates the entire processing workflow with the following states:
+#### 3. Orchestration (Step Functions) - **Issue #4 Implementation** ✅
 
-- **State 1: Validation**
-  - Invoke Validate Lambda to check file format, size, and content
-  - Perform virus/malware scanning (optional integration with third-party tools)
-  - Extract initial metadata (filename, size, content-type, upload timestamp)
-  - Write initial record to DynamoDB with status `VALIDATING`
-  - On failure: transition to error handler
+The **Step Functions State Machine** (`SleepAudioPipelineStateMachine`) has been implemented as the orchestration layer for the audio processing pipeline. This is a **minimal skeleton** implementation as per Issue #4 requirements.
 
-- **State 2: Parallel Processing (Choice)**
-  - Based on file type, choose processing path:
-    - **Text files (`.txt`)**: Route to Polly Lambda for TTS conversion
-    - **Audio files (`.mp3`, `.wav`)**: Route to Bedrock Lambda for enhancement
-    - **Both**: Execute parallel branches for multi-stage processing
+**Current State Machine Flow (Minimal):**
+```
+Start → Polly Task (StartSpeechSynthesisTask) → End
+```
 
-- **State 3: Text-to-Speech (Polly Lambda)**
-  - Read text content from S3
-  - Call Amazon Polly API with:
-    - Voice ID: Neural voices (e.g., Joanna, Matthew, Amy)
-    - Output format: MP3, PCM
-    - Speech rate: Optimized for relaxation (80-90% speed)
-    - SSML support for advanced control (pauses, emphasis, prosody)
-  - Stream audio output to temporary buffer
-  - Upload generated audio to Output S3 Bucket
-  - Update DynamoDB: status `POLLY_COMPLETE`, audio duration, output S3 key
+**Polly Task Configuration:**
+- **Service**: Amazon Polly
+- **Action**: `StartSpeechSynthesisTask` (asynchronous processing)
+- **Parameters**:
+  - Engine: Neural
+  - Output Format: MP3
+  - Voice ID: Joanna (soothing female voice)
+  - Output S3 Bucket: Configured to write to Output Bucket
+  - Text Input: Placeholder (uses S3 object key from event)
+- **IAM Permissions**: Least privilege access to Polly actions and S3 read/write
 
-- **State 4: AI Enhancement (Bedrock Lambda)**
-  - Download audio file from Input S3 or Polly output
-  - Invoke Bedrock foundation model for:
-    - Background ambient sound generation (rain, ocean, white noise)
-    - Audio quality enhancement (noise reduction, normalization)
-    - Mixing with binaural beats or ASMR elements
-  - Upload enhanced audio to Output S3 Bucket
-  - Update DynamoDB: status `ENHANCED`, processing details
+**Logging and Observability:**
+- **CloudWatch Logs**: Dedicated log group at `/aws/stepfunctions/sleep-audio-pipeline`
+- **Log Level**: ALL (captures all execution details including input/output data)
+- **X-Ray Tracing**: Enabled for distributed tracing
+- **Execution Data**: Full execution history captured for debugging
 
-- **State 5: Completion**
-  - Update DynamoDB: final status `COMPLETED`
-  - Publish success message to SNS Success Topic
-  - Include download URL (pre-signed) and metadata summary
+**Future Enhancements (Upcoming Issues):**
+- Issue #5: Add DynamoDB metadata table and input/output handling
+- Future: Add validation Lambda function (file format, size checks)
+- Future: Add error handling states (Catch, Retry logic)
+- Future: Add Bedrock Lambda for AI audio enhancement
+- Future: Add parallel processing branches for different file types
 
-- **Error Handling (Catch States)**
-  - Any task failure caught by error handler
-  - Update DynamoDB: status `FAILED`, error details
-  - Publish failure message to SNS Error Topic
-  - Log detailed error information to CloudWatch
-  - Implement exponential backoff retry logic (3 retries max)
-
-#### 4. Metadata Storage (DynamoDB)
+#### 4. Metadata Storage (DynamoDB) - **Coming in Issue #5**
 - **Table Structure**:
   ```
   Primary Key: audio_id (String) - UUID v4
@@ -613,18 +568,47 @@ cdk-sleep-py-qdev/
      }
      ```
 
+5. **Step Functions State Machine** (`SleepAudioPipelineStateMachine`) ✅
+   - **Status**: Implemented (Issue #4)
+   - **Purpose**: Orchestrates the audio processing workflow
+   - **Configuration**:
+     - State Machine Type: Standard (for long-running workflows)
+     - Logging: CloudWatch Logs with ALL level logging
+     - Log Group: `/aws/stepfunctions/sleep-audio-pipeline`
+     - X-Ray Tracing: Enabled
+     - Execution Role: Dedicated IAM role with least-privilege permissions
+   - **Current States**:
+     - **Polly Task**: Calls Amazon Polly `StartSpeechSynthesisTask` API
+       - Engine: Neural
+       - Voice: Joanna
+       - Output Format: MP3
+       - Output Destination: Output S3 Bucket
+   - **IAM Permissions**:
+     - `polly:StartSpeechSynthesisTask`, `polly:GetSpeechSynthesisTask`, `polly:ListSpeechSynthesisTasks`
+     - `s3:GetObject` on Input Bucket
+     - `s3:PutObject` on Output Bucket
+     ```
+
 4. **CloudWatch Log Group** (`SleepAudioEventLogGroup`) ✅
    - **Status**: Implemented (placeholder)
    - **Purpose**: Temporary target for EventBridge rule to validate event flow
    - **Location**: `/aws/events/sleep-audio-pipeline`
-   - **Note**: This is a placeholder that will be replaced by Step Functions in Issue #4
+   - **Note**: Now serves as secondary target (Issue #4) - primary target is Step Functions
+
+6. **CloudWatch Log Group for State Machine** (`SleepAudioStateMachineLogGroup`) ✅
+   - **Status**: Implemented (Issue #4)
+   - **Purpose**: Captures Step Functions execution logs for observability
+   - **Location**: `/aws/stepfunctions/sleep-audio-pipeline`
+   - **Removal Policy**: DESTROY (safe to delete logs in dev/test)
 
 **Pending Components** (to be added in future issues):
-- Step Functions state machine for orchestration (Issue #4)
-- Lambda functions for audio processing (validate, polly, bedrock)
-- DynamoDB table for metadata
+- Lambda functions for audio processing (validate, bedrock)
+- DynamoDB table for metadata (Issue #5)
 - SNS topics for notifications (success/error)
-- CloudWatch log groups and alarms
+- CloudWatch alarms and dashboards
+- Error handling and retry logic in state machine
+- Additional Polly configuration (SSML support, voice selection)
+- Bedrock integration for AI enhancement
 
 ### Testing Strategy
 
@@ -671,4 +655,27 @@ cdk-sleep-py-qdev/
 
 3. **Documentation Update**:
    - Updated ARCHITECTURE.md to reflect implemented components
+#### Issue #4: Step Functions State Machine with Polly Integration (TDD Implementation) ✅
+**Date**: Current Release
+**Approach**: Strict Test-Driven Development (Red-Green-Refactor)
+
+**Changes Made**:
+1. **Test Phase (Red)**:
+   - Added 6 comprehensive TDD tests for Step Functions state machine
+   - Tests verify: state machine existence, CloudWatch logging, IAM roles, Polly task, EventBridge targeting, and Polly permissions
+   - All tests initially failed (as expected in TDD)
+
+2. **Implementation Phase (Green)**:
+   - Implemented `SleepAudioPipelineStateMachine` with minimal Polly task skeleton
+   - Used `CallAwsService` task to invoke Polly `StartSpeechSynthesisTask` API
+   - Configured CloudWatch Logs (ALL level) and X-Ray tracing for observability
+   - Updated EventBridge rule to target state machine (primary) and CloudWatch Logs (secondary)
+   - Granted least-privilege IAM permissions: S3 read/write, Polly synthesis tasks
+   - All tests now pass ✅
+
+3. **Documentation Update**:
+   - Updated ARCHITECTURE.md with simplified Mermaid diagram showing current implementation
+   - Marked Step Functions state machine as implemented (✅)
+   - Added detailed section on orchestration layer with Polly integration
+   - Documented future enhancements for upcoming issues
    - Marked Input/Output buckets and EventBridge rule as implemented (✅)

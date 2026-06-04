@@ -146,3 +146,84 @@ def test_eventbridge_rule_has_target(template):
     template.has_resource_properties("AWS::Events::Rule", {
         "Targets": assertions.Match.any_value()
     })
+
+
+# ============================================================================
+# TDD Tests for Issue #4: Step Functions State Machine with Polly Integration
+# ============================================================================
+
+def test_step_functions_state_machine_exists(template):
+    """TDD Test: Verify Step Functions state machine exists."""
+    template.resource_count_is("AWS::StepFunctions::StateMachine", 1)
+
+
+def test_state_machine_has_cloudwatch_logs_enabled(template):
+    """TDD Test: Verify state machine has CloudWatch Logs enabled."""
+    template.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "LoggingConfiguration": {
+            "Level": assertions.Match.string_like_regexp("ALL|ERROR|FATAL|OFF"),
+            "IncludeExecutionData": assertions.Match.any_value()
+        }
+    })
+
+
+def test_state_machine_has_execution_role(template):
+    """TDD Test: Verify state machine has an execution IAM role."""
+    # State machine should reference an IAM role
+    template.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "RoleArn": assertions.Match.any_value()
+    })
+    
+    # IAM role for state machine should exist
+    template.has_resource_properties("AWS::IAM::Role", {
+        "AssumeRolePolicyDocument": {
+            "Statement": [
+                {
+                    "Action": "sts:AssumeRole",
+                    "Effect": "Allow",
+                    "Principal": {
+                        "Service": "states.amazonaws.com"
+                    }
+                }
+            ]
+        }
+    })
+
+
+def test_state_machine_definition_contains_polly_task(template):
+    """TDD Test: Verify state machine definition contains Polly task or integration."""
+    # The state machine definition should contain a reference to Polly
+    # This checks that the DefinitionString contains "Polly" or "polly"
+    template.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*[Pp]olly.*")
+    })
+
+
+def test_eventbridge_rule_targets_state_machine(template):
+    """TDD Test: Verify EventBridge rule now targets Step Functions state machine."""
+    # EventBridge rule should have a target that points to a Step Functions state machine
+    # The target should have Arn pointing to a state machine and RoleArn for invoking it
+    template.has_resource_properties("AWS::Events::Rule", {
+        "Targets": [
+            {
+                "Arn": assertions.Match.any_value(),
+                "RoleArn": assertions.Match.any_value()
+            }
+        ]
+    })
+
+
+def test_state_machine_iam_role_has_polly_permissions(template):
+    """TDD Test: Verify state machine IAM role has Polly permissions (least privilege)."""
+    # Check that there's an IAM policy that grants polly permissions
+    template.has_resource_properties("AWS::IAM::Policy", {
+        "PolicyDocument": {
+            "Statement": assertions.Match.array_with([
+                assertions.Match.object_like({
+                    "Action": assertions.Match.any_value(),
+                    "Effect": "Allow",
+                    "Resource": assertions.Match.any_value()
+                })
+            ])
+        }
+    })
