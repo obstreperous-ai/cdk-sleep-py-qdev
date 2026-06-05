@@ -227,3 +227,95 @@ def test_state_machine_iam_role_has_polly_permissions(template):
             ])
         }
     })
+
+
+# ============================================================================
+# TDD Tests for Issue #5: DynamoDB Table + Step Functions I/O Handling
+# ============================================================================
+
+def test_dynamodb_table_exists(template):
+    """TDD Test: Verify DynamoDB table exists for audio metadata."""
+    template.resource_count_is("AWS::DynamoDB::Table", 1)
+
+
+def test_dynamodb_table_has_correct_key_schema(template):
+    """TDD Test: Verify DynamoDB table has correct partition key (audioId)."""
+    template.has_resource_properties("AWS::DynamoDB::Table", {
+        "KeySchema": [
+            {
+                "AttributeName": "audioId",
+                "KeyType": "HASH"
+            }
+        ],
+        "AttributeDefinitions": assertions.Match.array_with([
+            {
+                "AttributeName": "audioId",
+                "AttributeType": "S"
+            }
+        ])
+    })
+
+
+def test_dynamodb_table_has_encryption_enabled(template):
+    """TDD Test: Verify DynamoDB table has server-side encryption enabled."""
+    template.has_resource_properties("AWS::DynamoDB::Table", {
+        "SSESpecification": {
+            "SSEEnabled": True
+        }
+    })
+
+
+def test_dynamodb_table_has_billing_mode(template):
+    """TDD Test: Verify DynamoDB table has on-demand billing mode."""
+    template.has_resource_properties("AWS::DynamoDB::Table", {
+        "BillingMode": "PAY_PER_REQUEST"
+    })
+
+
+def test_dynamodb_table_has_point_in_time_recovery(template):
+    """TDD Test: Verify DynamoDB table has point-in-time recovery enabled."""
+    template.has_resource_properties("AWS::DynamoDB::Table", {
+        "PointInTimeRecoverySpecification": {
+            "PointInTimeRecoveryEnabled": True
+        }
+    })
+
+
+def test_state_machine_has_dynamodb_permissions(template):
+    """TDD Test: Verify state machine IAM role has DynamoDB read/write permissions."""
+    # Check that there's an IAM policy that grants DynamoDB permissions
+    template.has_resource_properties("AWS::IAM::Policy", {
+        "PolicyDocument": {
+            "Statement": assertions.Match.array_with([
+                assertions.Match.object_like({
+                    "Action": assertions.Match.array_with([
+                        assertions.Match.string_like_regexp("dynamodb:PutItem|dynamodb:UpdateItem")
+                    ]),
+                    "Effect": "Allow"
+                })
+            ])
+        }
+    })
+
+
+def test_state_machine_definition_contains_dynamodb_task(template):
+    """TDD Test: Verify state machine definition contains DynamoDB task."""
+    # The state machine definition should contain references to DynamoDB operations
+    # This checks that the DefinitionString contains "DynamoDB" or "dynamodb"
+    template.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*[Dd]ynamo[Dd][Bb].*")
+    })
+
+
+def test_state_machine_input_mapping_from_s3_event(template):
+    """TDD Test: Verify EventBridge passes S3 event data to state machine correctly."""
+    # EventBridge rule should pass the entire event (already implemented in Issue #4)
+    # This test verifies the input mapping is configured
+    template.has_resource_properties("AWS::Events::Rule", {
+        "Targets": assertions.Match.array_with([
+            assertions.Match.object_like({
+                "Arn": assertions.Match.any_value(),
+                "Input": assertions.Match.absent()  # No custom input transform, passes full event
+            })
+        ])
+    })
