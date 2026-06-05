@@ -1,6 +1,7 @@
 from aws_cdk import (
     Stack,
     aws_s3 as s3,
+    aws_sns as sns,
     aws_dynamodb as dynamodb,
     aws_events as events,
     aws_events_targets as targets,
@@ -74,6 +75,25 @@ class CdkBaseStack(Stack):
         )
         
         # ====================================================================
+        # Issue #6: SNS Topics for Pipeline Notifications
+        # ====================================================================
+        
+        # SNS Topic for successful pipeline completion
+        self.completed_topic = sns.Topic(
+            self,
+            "SleepAudioPipelineCompleted",
+            display_name="Sleep Audio Pipeline Completed",
+            master_key=sns.Topic.DEFAULT_MASTER_KEY,  # Use default AWS managed KMS key
+        )
+        
+        # SNS Topic for pipeline failures
+        self.failed_topic = sns.Topic(
+            self,
+            "SleepAudioPipelineFailed",
+            display_name="Sleep Audio Pipeline Failed",
+            master_key=sns.Topic.DEFAULT_MASTER_KEY,  # Use default AWS managed KMS key
+        )
+        
         # ====================================================================
         
         # CloudWatch Log Group for Step Functions state machine
@@ -131,10 +151,113 @@ class CdkBaseStack(Stack):
             result_path="$.pollyResult",
         )
         
-        # Define the state machine with Polly task
-        # Define the state machine workflow
-        # Flow: Start → DynamoDB PutItem (initial record) → Polly Task → End
-        state_machine_definition = put_metadata_task.next(polly_task)
+        # ====================================================================
+        # Issue #6: Error Handling and Status Updates
+        # ====================================================================
+        
+        # SUCCESS PATH: Update DynamoDB status to COMPLETED
+        update_status_completed = tasks.DynamoUpdateItem(
+            self,
+            "UpdateStatusCompleted",
+            table=self.metadata_table,
+            key={
+                "audioId": tasks.DynamoAttributeValue.from_string(
+                    sfn.JsonPath.string_at("$.detail.object.key")
+                )
+            },
+            update_expression="SET #status = :completed, #updatedAt = :timestamp",
+            expression_attribute_names={
+                "#status": "status",
+                "#updatedAt": "updatedAt"
+            },
+            expression_attribute_values={
+                ":completed": tasks.DynamoAttributeValue.from_string("COMPLETED"),
+                ":timestamp": tasks.DynamoAttributeValue.from_string(
+                    sfn.JsonPath.string_at("$$.State.EnteredTime")
+                )
+            },
+            result_path="$.updateCompletedResult",
+        )
+        
+        # SUCCESS PATH: Publish success notification to SNS
+        publish_success = tasks.SnsPublish(
+            self,
+            "PublishSuccessNotification",
+            topic=self.completed_topic,
+            message=sfn.TaskInput.from_object({
+                "status": "COMPLETED",
+                "audioId": sfn.JsonPath.string_at("$.detail.object.key"),
+                "bucket": sfn.JsonPath.string_at("$.detail.bucket.name"),
+                "timestamp": sfn.JsonPath.string_at("$$.State.EnteredTime"),
+                "message": "Audio processing completed successfully"
+            }),
+            subject="Sleep Audio Pipeline - Processing Completed",
+            result_path="$.snsSuccessResult",
+        )
+        
+        # ERROR PATH: Update DynamoDB status to FAILED
+        update_status_failed = tasks.DynamoUpdateItem(
+            self,
+            "UpdateStatusFailed",
+            table=self.metadata_table,
+            key={
+                "audioId": tasks.DynamoAttributeValue.from_string(
+                    sfn.JsonPath.string_at("$.detail.object.key")
+                )
+            },
+            update_expression="SET #status = :failed, #updatedAt = :timestamp, #error = :errorMsg",
+            expression_attribute_names={
+                "#status": "status",
+                "#updatedAt": "updatedAt",
+                "#error": "errorMessage"
+            },
+            expression_attribute_values={
+                ":failed": tasks.DynamoAttributeValue.from_string("FAILED"),
+                ":timestamp": tasks.DynamoAttributeValue.from_string(
+                    sfn.JsonPath.string_at("$$.State.EnteredTime")
+                ),
+                ":errorMsg": tasks.DynamoAttributeValue.from_string(
+                    sfn.JsonPath.string_at("$.errorMessage")
+                )
+            },
+            result_path="$.updateFailedResult",
+        )
+        
+        # ERROR PATH: Publish error notification to SNS
+        publish_error = tasks.SnsPublish(
+            self,
+            "PublishErrorNotification",
+            topic=self.failed_topic,
+            message=sfn.TaskInput.from_object({
+                "status": "FAILED",
+                "audioId": sfn.JsonPath.string_at("$.detail.object.key"),
+                "bucket": sfn.JsonPath.string_at("$.detail.bucket.name"),
+                "timestamp": sfn.JsonPath.string_at("$$.State.EnteredTime"),
+                "error": sfn.JsonPath.string_at("$.errorMessage"),
+                "message": "Audio processing failed"
+            }),
+            subject="Sleep Audio Pipeline - Processing Failed",
+            result_path="$.snsErrorResult",
+        )
+        
+        # Chain the error path: update status → publish notification
+        error_handler_chain = update_status_failed.next(publish_error)
+        
+        # Add error handling (Catch) to Polly task
+        polly_task.add_catch(
+            error_handler_chain,
+            errors=["States.ALL"],
+            result_path="$.errorInfo"
+        )
+        
+        # Chain the success path: Polly → update status → publish notification
+        success_chain = polly_task.next(update_status_completed).next(publish_success)
+        
+        # Define the complete state machine workflow
+        # Flow: Start → PutInitialMetadata → PollyTask (with Catch) → UpdateStatusCompleted → PublishSuccess → End
+        #       Error Path: Catch → UpdateStatusFailed → PublishError → End
+        state_machine_definition = put_metadata_task.next(success_chain)
+        
         # Create the state machine
         state_machine = sfn.StateMachine(
             self,
@@ -175,6 +298,18 @@ class CdkBaseStack(Stack):
             )
         )
         
+        # ====================================================================
+        # Issue #6: Grant SNS Publish Permissions
+        # ====================================================================
+        
+        # Grant the state machine permissions to publish to SNS topics
+        self.completed_topic.grant_publish(state_machine)
+        self.failed_topic.grant_publish(state_machine)
+        
+        # Note: DynamoDB UpdateItem permissions are already covered by grant_write_data()
+        # which includes both PutItem and UpdateItem actions
+        
+        # ====================================================================
         # ====================================================================
         # EventBridge Rule - Wiring to Step Functions
         # ====================================================================
