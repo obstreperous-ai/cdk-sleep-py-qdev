@@ -1,6 +1,7 @@
 from aws_cdk import (
     Stack,
     aws_s3 as s3,
+    aws_lambda as lambda_,
     aws_sns as sns,
     aws_dynamodb as dynamodb,
     aws_events as events,
@@ -77,6 +78,33 @@ class CdkBaseStack(Stack):
         # ====================================================================
         # Issue #6: SNS Topics for Pipeline Notifications
         # ====================================================================
+        # Issue #7: Lambda Function for Audio Processing
+        # ====================================================================
+        
+        # Lambda function for audio processing - placeholder for future validation,
+        # metadata enrichment, or other processing logic
+        self.audio_processor_lambda = lambda_.Function(
+            self,
+            "SleepAudioProcessor",
+            function_name="SleepAudioProcessor",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=lambda_.Code.from_asset("lambda/audio_processor"),
+            environment={
+                "TABLE_NAME": self.metadata_table.table_name,
+            },
+            description="Audio processor Lambda for validation and metadata enrichment",
+            timeout=Duration.seconds(30),  # 30 second timeout for processing
+        )
+        
+        # Grant Lambda function read access to DynamoDB table (for future enhancements)
+        # Currently the Lambda just logs and returns, but this permission enables
+        # future features like reading existing metadata or updating records
+        self.metadata_table.grant_read_data(self.audio_processor_lambda)
+        
+        # ====================================================================
+        # Issue #6: SNS Topics for Pipeline Notifications
+        # ====================================================================
         
         # SNS Topic for successful pipeline completion
         self.completed_topic = sns.Topic(
@@ -130,6 +158,20 @@ class CdkBaseStack(Stack):
                 ),
             },
             result_path="$.dynamoResult",
+        )
+        
+        # ====================================================================
+        # Issue #7: Lambda Invocation Task
+        # ====================================================================
+        
+        # Lambda invocation task - processes audio metadata and performs validation
+        # This is inserted after PutInitialMetadata and before Polly task
+        invoke_audio_processor = tasks.LambdaInvoke(
+            self,
+            "InvokeAudioProcessor",
+            lambda_function=self.audio_processor_lambda,
+            payload=sfn.TaskInput.from_object(sfn.JsonPath.entire_payload),
+            result_path="$.lambdaResult",
         )
         
         # This uses StartSpeechSynthesisTask for async processing
@@ -254,9 +296,9 @@ class CdkBaseStack(Stack):
         success_chain = polly_task.next(update_status_completed).next(publish_success)
         
         # Define the complete state machine workflow
-        # Flow: Start → PutInitialMetadata → PollyTask (with Catch) → UpdateStatusCompleted → PublishSuccess → End
+        # Flow: Start → PutInitialMetadata → InvokeAudioProcessor (Lambda) → PollyTask (with Catch) → UpdateStatusCompleted → PublishSuccess → End
         #       Error Path: Catch → UpdateStatusFailed → PublishError → End
-        state_machine_definition = put_metadata_task.next(success_chain)
+        state_machine_definition = put_metadata_task.next(invoke_audio_processor).next(success_chain)
         
         # Create the state machine
         state_machine = sfn.StateMachine(
