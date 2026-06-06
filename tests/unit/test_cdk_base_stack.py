@@ -319,3 +319,124 @@ def test_state_machine_input_mapping_from_s3_event(template):
             })
         ])
     })
+
+
+# ============================================================================
+# TDD Tests for Issue #6: SNS Notifications and Error Handling
+# ============================================================================
+
+def test_sns_topics_exist(template):
+    """TDD Test: Verify SNS topics exist for notifications."""
+    # Should have 2 SNS topics: one for completion, one for errors
+    template.resource_count_is("AWS::SNS::Topic", 2)
+
+
+def test_sns_topics_have_encryption(template):
+    """TDD Test: Verify SNS topics have KMS encryption enabled."""
+    # Both topics should have KMS encryption
+    template.has_resource_properties("AWS::SNS::Topic", {
+        "KmsMasterKeyId": assertions.Match.any_value()
+    })
+
+
+def test_sns_completed_topic_exists(template):
+    """TDD Test: Verify SNS topic for pipeline completion exists."""
+    # Check for topic with display name containing "Completed" or similar
+    template.has_resource_properties("AWS::SNS::Topic", {
+        "DisplayName": assertions.Match.string_like_regexp(".*[Cc]ompleted.*")
+    })
+
+
+def test_sns_failed_topic_exists(template):
+    """TDD Test: Verify SNS topic for pipeline errors exists."""
+    # Check for topic with display name containing "Failed" or "Error"
+    template.has_resource_properties("AWS::SNS::Topic", {
+        "DisplayName": assertions.Match.string_like_regexp(".*[Ff]ailed.*|.*[Ee]rror.*")
+    })
+
+
+def test_state_machine_has_error_handling(template):
+    """TDD Test: Verify state machine definition contains error handling (Catch blocks)."""
+    # The state machine definition should contain Catch or error handling keywords
+    template.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*[Cc]atch.*")
+    })
+
+
+def test_state_machine_publishes_to_sns_on_success(template):
+    """TDD Test: Verify state machine publishes to SNS on successful completion."""
+    # The state machine definition should contain SNS publish action
+    template.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*sns:Publish.*")
+    })
+
+
+def test_state_machine_publishes_to_sns_on_failure(template):
+    """TDD Test: Verify state machine publishes to SNS on error/failure."""
+    # This is covered by the general SNS publish test above
+    # and the error handling test (Catch blocks)
+    # The definition should have both Catch and sns:Publish
+    template.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*[Cc]atch.*")
+    })
+    template.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*sns:Publish.*")
+    })
+
+
+def test_state_machine_updates_status_to_completed(template):
+    """TDD Test: Verify state machine updates DynamoDB status to COMPLETED."""
+    # The state machine definition should contain UpdateItem with COMPLETED status
+    template.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*COMPLETED.*")
+    })
+
+
+def test_state_machine_updates_status_to_failed(template):
+    """TDD Test: Verify state machine updates DynamoDB status to FAILED."""
+    # The state machine definition should contain UpdateItem with FAILED status
+    template.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*FAILED.*")
+    })
+
+
+def test_dynamodb_status_updates_in_definition(template):
+    """TDD Test: Verify state machine definition contains DynamoDB UpdateItem operations."""
+    # The state machine definition should contain UpdateItem action
+    template.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*dynamodb:UpdateItem.*|.*UpdateItem.*")
+    })
+
+
+def test_state_machine_has_sns_publish_permissions(template):
+    """TDD Test: Verify state machine IAM role has SNS publish permissions."""
+    # Check that there's an IAM policy that grants SNS publish permissions
+    template.has_resource_properties("AWS::IAM::Policy", {
+        "PolicyDocument": {
+            "Statement": assertions.Match.array_with([
+                assertions.Match.object_like({
+                    "Action": assertions.Match.array_with([
+                        "sns:Publish"
+                    ]),
+                    "Effect": "Allow"
+                })
+            ])
+        }
+    })
+
+
+def test_state_machine_has_dynamodb_update_permissions(template):
+    """TDD Test: Verify state machine IAM role has DynamoDB UpdateItem permissions."""
+    # This should already exist from Issue #5, but verify it's there
+    template.has_resource_properties("AWS::IAM::Policy", {
+        "PolicyDocument": {
+            "Statement": assertions.Match.array_with([
+                assertions.Match.object_like({
+                    "Action": assertions.Match.array_with([
+                        assertions.Match.string_like_regexp(".*dynamodb:UpdateItem.*")
+                    ]),
+                    "Effect": "Allow"
+                })
+            ])
+        }
+    })
