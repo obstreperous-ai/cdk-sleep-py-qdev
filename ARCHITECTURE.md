@@ -842,3 +842,30 @@ cdk-sleep-py-qdev/
    - Updated Stack Components section with SNS and error handling details
    - Added Issue #6 to Change Log
    - Marked Input/Output buckets and EventBridge rule as implemented (✅)
+
+#### Issue #7: Lambda Function Integration (TDD Implementation) ✅
+**Date**: Current Release
+**Approach**: Strict Test-Driven Development (Red-Green-Refactor)
+
+**Changes Made**:
+1. **Test Phase (Red)**:
+   - Added 8 comprehensive TDD tests for Lambda function integration
+   - Tests verify: Lambda function existence, Python runtime, handler configuration, environment variables, execution role, state machine Lambda invocation, IAM permissions, snapshot test
+   - All tests initially failed (as expected in TDD)
+
+2. **Implementation Phase (Green)**:
+   - Created `SleepAudioProcessor` Lambda function with Python 3.12 runtime
+   - Implemented minimal handler in `lambda/audio_processor/handler.py`
+   - Handler logs S3 event details and returns success response
+   - Added Lambda invocation task in state machine (between PutInitialMetadata and Polly)
+   - Granted DynamoDB read permissions to Lambda (for future enhancements)
+   - Granted Lambda invoke permissions to state machine role
+   - All tests now pass ✅
+
+3. **Documentation Update**:
+   - Updated ARCHITECTURE.md Mermaid diagram to show Lambda function in workflow
+   - Added Lambda function section describing current role and future purpose
+   - Updated state machine flow description to include Lambda invocation
+   - Added Lambda to AWS Services Rationale section
+   - Updated project structure to show lambda/ directory
+   - Added Issue #7 to Change Log

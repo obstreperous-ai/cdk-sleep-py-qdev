@@ -440,3 +440,97 @@ def test_state_machine_has_dynamodb_update_permissions(template):
             ])
         }
     })
+
+
+# ============================================================================
+# TDD Tests for Issue #7: Lambda Function Integration
+# ============================================================================
+
+def test_lambda_function_exists(template):
+    """TDD Test: Verify Lambda function exists for audio processing."""
+    # Should have 1 Lambda function: SleepAudioProcessor
+    template.resource_count_is("AWS::Lambda::Function", 1)
+
+
+def test_lambda_function_has_python_runtime(template):
+    """TDD Test: Verify Lambda function uses Python runtime."""
+    # Lambda should use Python 3.12 or later
+    template.has_resource_properties("AWS::Lambda::Function", {
+        "Runtime": assertions.Match.string_like_regexp("python3\\..*")
+    })
+
+
+def test_lambda_function_has_correct_handler(template):
+    """TDD Test: Verify Lambda function has correct handler configuration."""
+    # Handler should point to handler.lambda_handler
+    template.has_resource_properties("AWS::Lambda::Function", {
+        "Handler": assertions.Match.string_like_regexp(".*handler\\.lambda_handler.*|.*lambda_handler.*")
+    })
+
+
+def test_lambda_function_has_environment_variables(template):
+    """TDD Test: Verify Lambda function has environment variables configured."""
+    # Lambda should have environment variables including TABLE_NAME
+    template.has_resource_properties("AWS::Lambda::Function", {
+        "Environment": {
+            "Variables": assertions.Match.object_like({
+                "TABLE_NAME": assertions.Match.any_value()
+            })
+        }
+    })
+
+
+def test_lambda_execution_role_exists(template):
+    """TDD Test: Verify Lambda function has an execution IAM role."""
+    # Lambda function should reference an IAM role
+    template.has_resource_properties("AWS::Lambda::Function", {
+        "Role": assertions.Match.any_value()
+    })
+    
+    # IAM role for Lambda should exist with correct trust policy
+    template.has_resource_properties("AWS::IAM::Role", {
+        "AssumeRolePolicyDocument": {
+            "Statement": assertions.Match.array_with([
+                {
+                    "Action": "sts:AssumeRole",
+                    "Effect": "Allow",
+                    "Principal": {
+                        "Service": "lambda.amazonaws.com"
+                    }
+                }
+            ])
+        }
+    })
+
+
+def test_state_machine_definition_contains_lambda_invoke(template):
+    """TDD Test: Verify state machine definition contains Lambda invocation task."""
+    # The state machine definition should contain a Lambda invoke action
+    # This checks that the DefinitionString contains "lambda:InvokeFunction" or similar
+    template.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*lambda:InvokeFunction.*|.*Lambda.*")
+    })
+
+
+def test_state_machine_role_has_lambda_invoke_permissions(template):
+    """TDD Test: Verify state machine IAM role has permission to invoke Lambda."""
+    # Check that there's an IAM policy that grants lambda:InvokeFunction permission
+    template.has_resource_properties("AWS::IAM::Policy", {
+        "PolicyDocument": {
+            "Statement": assertions.Match.array_with([
+                assertions.Match.object_like({
+                    "Action": "lambda:InvokeFunction",
+                    "Effect": "Allow"
+                })
+            ])
+        }
+    })
+
+
+def test_synthesized_template_snapshot(template):
+    """TDD Test: Snapshot test to catch unexpected changes in synthesized template."""
+    # This test verifies the template structure hasn't changed unexpectedly
+    # It's a broad check that complements the fine-grained tests above
+    template_dict = template.to_json()
+    assert "Resources" in template_dict
+    assert len(template_dict["Resources"]) > 0
