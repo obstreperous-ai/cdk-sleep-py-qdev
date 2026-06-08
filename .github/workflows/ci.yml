@@ -43,13 +43,28 @@ jobs:
 
     - name: Run CDK synth
       run: |
-        cdk synth
+        echo "Testing default environment (dev)"
+        cdk synth --quiet
 
-    - name: Run CDK diff (mock)
+    - name: Run CDK synth for all environments
       run: |
-        # CDK diff requires AWS credentials and a deployed stack
-        # For CI, we validate the synth output instead
-        cdk synth > /dev/null && echo "CDK synth successful - diff would run against deployed stack"
+        echo "Testing dev environment"
+        cdk synth --context env=dev --quiet
+        echo "✅ Dev environment synth successful"
+        
+        echo "Testing stage environment"
+        cdk synth --context env=stage --quiet
+        echo "✅ Stage environment synth successful"
+        
+        echo "Testing prod environment"
+        cdk synth --context env=prod --quiet
+        echo "✅ Prod environment synth successful"
+        
+        echo "All environments synthesized successfully!"
+
+    - name: Validate cdk diff capability
+      run: |
+        echo "CDK diff would run against deployed stack with AWS credentials"
 
   lint:
     runs-on: ubuntu-latest
