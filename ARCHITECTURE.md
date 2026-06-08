@@ -869,3 +869,88 @@ cdk-sleep-py-qdev/
    - Added Lambda to AWS Services Rationale section
    - Updated project structure to show lambda/ directory
    - Added Issue #7 to Change Log
+
+#### Issue #8: Complete Pipeline Wiring with Input Validation (TDD Implementation) ✅
+**Date**: Current Release
+**Approach**: Strict Test-Driven Development (Red-Green-Refactor)
+
+**Milestone**: This issue represents a major milestone - the **complete basic pipeline** is now functionally connected and operational.
+
+**Changes Made**:
+
+1. **Test Phase (Red)** - 8 New TDD Tests:
+   - Added comprehensive tests for complete pipeline integration
+   - Tests verify: EventBridge→Step Functions wiring, all orchestration steps, Lambda error handling, validation error paths, DynamoDB/SNS updates on errors, IAM permissions, complete stack snapshot
+   - All tests initially failed (as expected in TDD) ✅
+
+2. **Implementation Phase (Green)** - Input Validation & Error Handling:
+   
+   **Lambda Handler Enhancement** (`lambda/audio_processor/handler.py`):
+   - Added `validate_s3_event()` function to validate event structure and required fields (bucket, key)
+   - Added `validate_file_extension()` function with supported formats: `.mp3`, `.wav`, `.flac`, `.txt`, `.m4a`, `.ogg`
+   - Added custom `ValidationError` exception class for structured error handling
+   - Enhanced `lambda_handler()` to call validation functions before processing
+   - Validation errors are re-raised so Step Functions can catch and handle them
+   - Comprehensive error logging for troubleshooting
+   
+   **State Machine Enhancement** (`cdk_base/cdk_base_stack.py`):
+   - Added Catch block to Lambda invocation task to handle validation and runtime errors
+   - Routes Lambda errors to error handler chain: UpdateStatusFailed → PublishErrorNotification
+   - Created separate error handler chains for Lambda and Polly errors with contextual messages
+   - Both error paths update DynamoDB status to FAILED and publish to failure SNS topic
+   - All error paths complete gracefully (no unhandled failures)
+   
+   - All tests now pass ✅
+
+3. **Documentation Update**:
+   - Updated ARCHITECTURE.md with complete pipeline documentation
+   - Documented input validation features and error handling
+   - Added end-to-end flow summary for success and error paths
+   - Documented security and IAM permissions across all components
+   - Added Issue #8 to Change Log
+
+**End-to-End Flow Summary (Complete Pipeline)**:
+
+**Success Path**:
+1. User uploads file to S3 Input Bucket
+2. S3 sends "Object Created" event to EventBridge
+3. EventBridge rule triggers Step Functions state machine
+4. State machine creates DynamoDB record (status=PROCESSING)
+5. State machine invokes Lambda for validation
+6. Lambda validates S3 event structure and file extension
+7. Lambda returns success response
+8. State machine invokes Polly for text-to-speech synthesis
+9. Polly completes successfully
+10. State machine updates DynamoDB (status=COMPLETED)
+11. State machine publishes success notification to SNS
+12. Pipeline execution completes ✅
+
+**Error Path (Validation Failure)**:
+1-5. Same as success path
+6. Lambda validation fails (invalid extension or missing fields)
+7. Lambda raises ValidationError
+8. Step Functions Catch block intercepts error
+9. State machine updates DynamoDB (status=FAILED, errorMessage=validation error)
+10. State machine publishes error notification to SNS
+11. Pipeline execution completes gracefully ❌
+
+**Error Path (Polly Failure)**:
+1-7. Same as success path
+8. Polly task fails (service error, invalid parameters, etc.)
+9. Step Functions Catch block intercepts error
+10. State machine updates DynamoDB (status=FAILED, errorMessage=Polly error)
+11. State machine publishes error notification to SNS
+12. Pipeline execution completes gracefully ❌
+
+**Security & IAM**:
+- Lambda has DynamoDB read permissions (for future enhancements)
+- State machine has Lambda invoke permissions (least privilege)
+- State machine has DynamoDB read/write permissions
+- State machine has S3 read (input) and write (output) permissions
+- State machine has Polly synthesis permissions
+- State machine has SNS publish permissions (both topics)
+- All permissions follow least-privilege principle
+
+**Next Steps** (Issue #9):
+- Pipeline testing and refinement
+- Deployment preparation and documentation

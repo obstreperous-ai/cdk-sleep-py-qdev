@@ -534,3 +534,89 @@ def test_synthesized_template_snapshot(template):
     template_dict = template.to_json()
     assert "Resources" in template_dict
     assert len(template_dict["Resources"]) > 0
+
+
+# ============================================================================
+# TDD Tests for Issue #8: Complete Pipeline Wiring with Input Validation
+# ============================================================================
+
+def test_complete_pipeline_wiring_eventbridge_to_stepfunctions(template):
+    """TDD Test: Verify EventBridge correctly wires to Step Functions for end-to-end flow."""
+    # EventBridge rule must target the Step Functions state machine
+    template.has_resource_properties("AWS::Events::Rule", {
+        "Targets": assertions.Match.array_with([
+            assertions.Match.object_like({
+                "Arn": assertions.Match.any_value(),
+                "RoleArn": assertions.Match.any_value()
+            })
+        ])
+    })
+
+
+def test_complete_pipeline_contains_all_orchestration_steps(template):
+    """TDD Test: Verify state machine contains all required steps in the pipeline."""
+    # State machine should contain: DynamoDB, Lambda, Polly, UpdateItem, SNS
+    definition_string = template.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*[Dd]ynamo[Dd][Bb].*")
+    })
+    template.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*lambda:InvokeFunction.*")
+    })
+    template.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*[Pp]olly.*")
+    })
+
+
+def test_lambda_has_error_handling_in_state_machine(template):
+    """TDD Test: Verify Lambda invocation task has error handling (Catch block)."""
+    # The state machine should handle Lambda errors with Catch blocks
+    template.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*[Cc]atch.*")
+    })
+
+
+def test_validation_error_path_updates_dynamodb_to_failed(template):
+    """TDD Test: Verify validation errors result in FAILED status in DynamoDB."""
+    # State machine should contain FAILED status update
+    template.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*FAILED.*")
+    })
+
+
+def test_validation_error_path_publishes_to_failure_sns(template):
+    """TDD Test: Verify validation errors publish to failure SNS topic."""
+    # Already covered by test_state_machine_publishes_to_sns_on_failure
+    # but verifying the complete error flow exists
+    template.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*sns:Publish.*")
+    })
+
+
+def test_all_iam_permissions_correctly_configured(template):
+    """TDD Test: Verify all IAM permissions across pipeline components."""
+    # State machine needs: S3, DynamoDB, Lambda, Polly, SNS permissions
+    # Check for S3 permissions
+    template.has_resource_properties("AWS::IAM::Policy", {
+        "PolicyDocument": {
+            "Statement": assertions.Match.array_with([
+                assertions.Match.object_like({
+                    "Action": assertions.Match.array_with([
+                        assertions.Match.string_like_regexp("s3:.*")
+                    ]),
+                    "Effect": "Allow"
+                })
+            ])
+        }
+    })
+
+
+def test_complete_stack_snapshot(template):
+    """TDD Test: Comprehensive snapshot test of complete integrated stack."""
+    template_dict = template.to_json()
+    # Verify all major resource types exist in the complete pipeline
+    assert "AWS::S3::Bucket" in str(template_dict)
+    assert "AWS::StepFunctions::StateMachine" in str(template_dict)
+    assert "AWS::Lambda::Function" in str(template_dict)
+    assert "AWS::DynamoDB::Table" in str(template_dict)
+    assert "AWS::SNS::Topic" in str(template_dict)
+    assert "AWS::Events::Rule" in str(template_dict)

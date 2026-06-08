@@ -283,11 +283,67 @@ class CdkBaseStack(Stack):
         )
         
         # Chain the error path: update status → publish notification
-        error_handler_chain = update_status_failed.next(publish_error)
+        lambda_error_handler_chain = update_status_failed.next(publish_error)
         
-        # Add error handling (Catch) to Polly task
+        # ====================================================================
+        # Issue #8: Add Error Handling to Lambda Invocation
+        # ====================================================================
+        
+        # Add error handling (Catch) to Lambda invocation task
+        # This catches validation errors and other Lambda failures
+        invoke_audio_processor.add_catch(
+            lambda_error_handler_chain,
+            errors=["States.ALL"],
+            result_path="$.errorInfo"
+        )
+        
+        # Add error handling (Catch) to Polly task (already exists, updating for consistency)
+        # Creates a separate error handler chain for Polly errors
+        polly_error_handler_chain = tasks.DynamoUpdateItem(
+            self,
+            "UpdateStatusFailedPolly",
+            table=self.metadata_table,
+            key={
+                "audioId": tasks.DynamoAttributeValue.from_string(
+                    sfn.JsonPath.string_at("$.detail.object.key")
+                )
+            },
+            update_expression="SET #status = :failed, #updatedAt = :timestamp, #error = :errorMsg",
+            expression_attribute_names={
+                "#status": "status",
+                "#updatedAt": "updatedAt",
+                "#error": "errorMessage"
+            },
+            expression_attribute_values={
+                ":failed": tasks.DynamoAttributeValue.from_string("FAILED"),
+                ":timestamp": tasks.DynamoAttributeValue.from_string(
+                    sfn.JsonPath.string_at("$$.State.EnteredTime")
+                ),
+                ":errorMsg": tasks.DynamoAttributeValue.from_string(
+                    sfn.JsonPath.string_at("$.errorMessage")
+                )
+            },
+            result_path="$.updateFailedResult",
+        ).next(
+            tasks.SnsPublish(
+                self,
+                "PublishPollyErrorNotification",
+                topic=self.failed_topic,
+                message=sfn.TaskInput.from_object({
+                    "status": "FAILED",
+                    "audioId": sfn.JsonPath.string_at("$.detail.object.key"),
+                    "bucket": sfn.JsonPath.string_at("$.detail.bucket.name"),
+                    "timestamp": sfn.JsonPath.string_at("$$.State.EnteredTime"),
+                    "error": sfn.JsonPath.string_at("$.errorMessage"),
+                    "message": "Polly processing failed"
+                }),
+                subject="Sleep Audio Pipeline - Polly Failed",
+                result_path="$.snsErrorResult",
+            )
+        )
+        
         polly_task.add_catch(
-            error_handler_chain,
+            polly_error_handler_chain,
             errors=["States.ALL"],
             result_path="$.errorInfo"
         )
