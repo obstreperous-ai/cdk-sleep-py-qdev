@@ -1,8 +1,10 @@
 """
 Lambda handler for audio processing in the Sleep Audio Pipeline.
 
-Issue #8 Enhancement: Added input validation for S3 events and file format checking
-for future audio processing, metadata enrichment, or validation logic.
+Issue #8: Added input validation for S3 events and file format checking
+Issue #10: Enhanced with structured JSON logging and improved observability
+          for production monitoring, X-Ray tracing support, and detailed
+          request tracking with correlation IDs.
 
 Current functionality:
 - Receives input from Step Functions state machine
@@ -11,6 +13,7 @@ Current functionality:
 - Basic error handling
 - Input validation for required fields (bucket, key)
 - File extension validation (rejects unsupported formats)
+- Structured JSON logging with request IDs and timestamps
 
 Future enhancements:
 - File validation (format, size, content-type)
@@ -22,11 +25,15 @@ Future enhancements:
 import json
 import logging
 import os
+import time
 from typing import Dict, Any
 
-# Configure logging
+# Configure structured logging for production observability
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# Simple JSON formatter for structured logs
+logging.basicConfig(format='%(message)s')
 
 # Environment variables
 TABLE_NAME = os.environ.get("TABLE_NAME", "SleepAudioMetadataTable")
@@ -41,6 +48,34 @@ class ValidationError(Exception):
 
 
 def validate_s3_event(event: Dict[str, Any]) -> Dict[str, str]:
+def log_structured(level: str, message: str, context: Dict[str, Any] = None, request_id: str = None):
+    """
+    Log structured JSON messages for better observability and monitoring.
+    
+    Args:
+        level: Log level (INFO, ERROR, WARNING, DEBUG)
+        message: Human-readable log message
+        context: Additional context data to include in log
+        request_id: Request/execution ID for correlation
+    """
+    log_entry = {
+        "timestamp": time.time(),
+        "level": level,
+        "message": message,
+        "request_id": request_id or "unknown",
+    }
+    
+    if context:
+        log_entry.update(context)
+    
+    log_message = json.dumps(log_entry)
+    
+    if level == "ERROR":
+        logger.error(log_message)
+    else:
+        logger.info(log_message)
+
+
     """
     Validate S3 event structure and extract required fields.
     
@@ -111,7 +146,7 @@ def validate_file_extension(file_key: str) -> bool:
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Lambda handler for audio processing with input validation.
-    
+    Enhanced with structured logging and X-Ray compatible tracing.
     Args:
         event: Input event from Step Functions containing S3 event details
         context: Lambda context object
@@ -119,41 +154,90 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Returns:
         Dict containing processing result with audioId, status, and metadata
     """
+    # Extract request ID from Lambda context for correlation
+    request_id = context.request_id if context else "local-test"
+    start_time = time.time()
+    
     try:
-        # Log the incoming event for debugging
-        logger.info(f"Received event: {json.dumps(event)}")
+        # Structured log: Processing started
+        log_structured(
+            "INFO",
+            "Audio processing started",
+            context={
+                "event_type": "processing_start",
+                "function_name": context.function_name if context else "unknown"
+            },
+            request_id=request_id
+        )
         
         # Validate S3 event structure and extract fields
         validated_data = validate_s3_event(event)
         bucket_name = validated_data["bucket"]
         audio_id = validated_data["key"]
         
-        logger.info(f"Validated S3 event - AudioId: {audio_id}, Bucket: {bucket_name}")
+        # Structured log: Validation successful
+        log_structured(
+            "INFO",
+            "S3 event validation successful",
+            context={
+                "event_type": "validation_success",
+                "audio_id": audio_id,
+                "bucket": bucket_name
+            },
+            request_id=request_id
+        )
         
         # Validate file extension
         validate_file_extension(audio_id)
-        logger.info(f"File extension validated for: {audio_id}")
         
-        # Placeholder for future processing logic (Issue #8+)
-        # Future enhancements:
-        # - Extract audio metadata (duration, bitrate, codec)
-        # - Validate file size limits
-        # - Perform content analysis
-        # - Check for duplicate uploads
+        # Structured log: File extension validated
+        processing_time = time.time() - start_time
+        log_structured(
+            "INFO",
+            "File extension validation successful",
+            context={
+                "event_type": "extension_validation_success",
+                "audio_id": audio_id,
+                "processing_time_ms": int(processing_time * 1000)
+            },
+            request_id=request_id
+        )
         
         # Return success response with basic metadata
-        return {
+        result = {
             "statusCode": 200,
             "audioId": audio_id,
             "bucket": bucket_name,
             "validationStatus": "PASSED",
-            "message": "Input validation and audio processing completed successfully"
+            "message": "Input validation and audio processing completed successfully",
+            "processingTimeMs": int(processing_time * 1000)
         }
         
+        # Structured log: Processing completed
+        log_structured(
+            "INFO",
+            "Audio processing completed successfully",
+            context={
+                "event_type": "processing_complete",
+                "audio_id": audio_id,
+                "status": "success",
+                "processing_time_ms": int(processing_time * 1000)
+            },
+            request_id=request_id
+        )
+        
+        return result
+        
     except ValidationError as e:
-        logger.error(f"Validation error: {str(e)}")
+        # Structured log: Validation error
+        log_structured("ERROR", "Validation error occurred", 
+                      context={"event_type": "validation_error", "error": str(e)},
+                      request_id=request_id)
         # Re-raise validation errors so Step Functions can catch and handle them
         raise
     except Exception as e:
-        logger.error(f"Error processing audio: {str(e)}", exc_info=True)
+        # Structured log: Unexpected error
+        log_structured("ERROR", "Unexpected error during processing",
+                      context={"event_type": "processing_error", "error": str(e)},
+                      request_id=request_id)
         raise

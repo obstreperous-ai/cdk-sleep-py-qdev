@@ -63,6 +63,13 @@ flowchart TD
     
     %% Observability
     StepFunctions -->|Execution Logs| CloudWatch[📊 CloudWatch<br/>State Machine Logs<br/>X-Ray Tracing Enabled]
+    %% Observability & Monitoring (Issue #10)
+    StepFunctions -->|X-Ray Tracing| XRay[🔍 AWS X-Ray<br/>Distributed Tracing<br/>Service Map]
+    StepFunctions -->|Failure Metrics| StateMachineAlarm[🚨 CloudWatch Alarm<br/>ExecutionsFailed >= 1<br/>5-min period]
+    ValidateLambda -.->|Error Metrics| LambdaAlarm[🚨 CloudWatch Alarm<br/>Errors >= 5<br/>5-min period]
+    StateMachineAlarm -->|Alert| OpsTeam
+    LambdaAlarm -->|Alert| OpsTeam
+    
     EventBridge -->|Debug Events| CloudWatch
     
     %% Styling
@@ -78,6 +85,7 @@ flowchart TD
     class InputBucket,OutputBucket storage
     class DynamoDB storage
     class StepFunctions,PollyTask,UpdateCompleted,UpdateFailed compute
+    classDef alarm fill:#FF6666,stroke:#CC0000,stroke-width:2px,color:#FFF
     class Polly ai
     class EventBridge event
     class CloudWatch monitoring
@@ -87,6 +95,8 @@ flowchart TD
 
 ### Data Flow Explanation
 
+    class StateMachineAlarm,LambdaAlarm alarm
+    class XRay monitoring
 #### 1. Audio Upload (Input)
 - **Trigger**: User uploads audio file (`.mp3`, `.wav`, `.flac`) or text file (`.txt`) to the **Input S3 Bucket**
 - **Storage**: Files stored with server-side encryption (SSE-KMS) and versioning enabled
@@ -112,14 +122,21 @@ flowchart TD
 #### 3. Orchestration (Step Functions) - **Issue #4 Implementation** ✅
 #### 3. Orchestration and Error Handling (Step Functions) - **Issues #4, #5, #6 Implemented** ✅
 The **Step Functions State Machine** (`SleepAudioPipelineStateMachine`) has been implemented as the orchestration layer for the audio processing pipeline. This is a **minimal skeleton** implementation as per Issue #4 requirements.
+#### 3. Orchestration, Error Handling, and Retry Logic (Step Functions) - **Issues #4, #5, #6, #8, #10 Implemented** ✅
+
 The **Step Functions State Machine** (`SleepAudioPipelineStateMachine`) orchestrates the complete audio processing pipeline with error handling and status tracking.
 **Current State Machine Flow (Minimal):**
+The **Step Functions State Machine** (`SleepAudioPipelineStateMachine`) orchestrates the complete audio processing pipeline with advanced error handling, retry policies, and full observability.
+
 **Current State Machine Flow (Enhanced with Error Handling):**
 Start → Polly Task (StartSpeechSynthesisTask) → End
+**Current State Machine Flow (Production-Ready with Retry & Observability):**
+
 Start 
   → PutInitialMetadata (status=PROCESSING, Issue #5)
-  → PollyTask (StartSpeechSynthesisTask, Issue #4)
-    ├─ SUCCESS PATH:
+  → PutInitialMetadata (status=PROCESSING, Issue #5, Retry: 3x with 2.0 backoff, Issue #10)
+  → InvokeAudioProcessor (Lambda validation, Issue #8, Retry: 3x with 2.0 backoff, Issue #10)
+  → PollyTask (StartSpeechSynthesisTask, Issue #4, Retry: 2x with 2.0 backoff, Issue #10)
     │   → UpdateStatusCompleted (status=COMPLETED, Issue #6)
     │   → PublishSuccessNotification (SNS, Issue #6)
     │   → End
@@ -129,6 +146,27 @@ Start
         → End
 
 **Polly Task Configuration:**
+**Retry Policies (Issue #10)**:
+- **Lambda Invocation**: 3 attempts, 2-second interval, 2.0 backoff rate
+  - Handles transient Lambda service errors and throttling
+- **Polly Task**: 2 attempts, 2-second interval, 2.0 backoff rate
+  - Handles transient Polly service errors
+- **DynamoDB Operations**: 3 attempts, 1-second interval, 2.0 backoff rate
+  - Handles throughput throttling (ProvisionedThroughputExceededException)
+- **Exponential Backoff**: Wait times double on each retry (e.g., 2s → 4s → 8s)
+
+**Error Handling (Issue #10)**:
+- **Specific Error Types**: Catches service-specific errors (Lambda.*, Polly.*, DynamoDB.*)
+- **Catch-All Fallback**: `States.ALL` ensures no unhandled exceptions
+- **Error Context**: Captures error message, original input, timestamp for troubleshooting
+- **Graceful Degradation**: All error paths update DynamoDB and notify via SNS
+
+**Observability (Issue #10)**:
+- **X-Ray Tracing**: End-to-end distributed tracing enabled on State Machine and Lambda
+- **Structured Logging**: JSON logs with request IDs, event types, processing times
+- **CloudWatch Alarms**: Automated alerts for execution failures and Lambda errors
+- **SNS Integration**: Alarms publish to failed SNS topic for immediate notification
+
 - **Service**: Amazon Polly
 - **Action**: `StartSpeechSynthesisTask` (asynchronous processing)
 - **Parameters**:
