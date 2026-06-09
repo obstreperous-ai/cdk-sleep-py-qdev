@@ -17,8 +17,14 @@ from constructs import Construct
 
 class CdkBaseStack(Stack):
 
-    def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
+    def __init__(self, scope: Construct, construct_id: str, env_name: str = None, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
+        
+        # Environment configuration - defaults to dev if not specified
+        self.env_name = env_name or self.node.try_get_context("env") or "dev"
+        
+        # Environment-specific configurations
+        self.env_config = self._get_environment_config()
 
         # ====================================================================
         # Issue #3: S3 Buckets and EventBridge Rule for Sleep Audio Pipeline
@@ -27,7 +33,7 @@ class CdkBaseStack(Stack):
         # Input S3 Bucket - receives raw audio/text uploads
         self.input_bucket = s3.Bucket(
             self,
-            "SleepAudioInputBucket",
+            f"SleepAudioInputBucket{self.env_name.capitalize()}",
             encryption=s3.BucketEncryption.S3_MANAGED,
             versioned=True,
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
@@ -39,7 +45,7 @@ class CdkBaseStack(Stack):
         # Output S3 Bucket - stores processed audio files
         self.output_bucket = s3.Bucket(
             self,
-            "SleepAudioOutputBucket",
+            f"SleepAudioOutputBucket{self.env_name.capitalize()}",
             encryption=s3.BucketEncryption.S3_MANAGED,
             versioned=True,
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
@@ -50,9 +56,10 @@ class CdkBaseStack(Stack):
         # CloudWatch Log Group for EventBridge rule (placeholder target)
         log_group = logs.LogGroup(
             self,
-            "SleepAudioEventLogGroup",
+            f"SleepAudioEventLogGroup{self.env_name.capitalize()}",
             log_group_name="/aws/events/sleep-audio-pipeline",
             removal_policy=RemovalPolicy.DESTROY,  # Safe to delete logs
+            retention=self.env_config["log_retention"],
         )
         
         # EventBridge Rule - triggers on S3 Object Created events
@@ -63,8 +70,8 @@ class CdkBaseStack(Stack):
         # DynamoDB Table - stores metadata for audio processing pipeline
         self.metadata_table = dynamodb.Table(
             self,
-            "SleepAudioMetadataTable",
-            table_name="SleepAudioMetadataTable",
+            f"SleepAudioMetadataTable{self.env_name.capitalize()}",
+            table_name=f"SleepAudioMetadataTable-{self.env_name}",
             partition_key=dynamodb.Attribute(
                 name="audioId",
                 type=dynamodb.AttributeType.STRING
@@ -85,7 +92,7 @@ class CdkBaseStack(Stack):
         # metadata enrichment, or other processing logic
         self.audio_processor_lambda = lambda_.Function(
             self,
-            "SleepAudioProcessor",
+            f"SleepAudioProcessor{self.env_name.capitalize()}",
             function_name="SleepAudioProcessor",
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="handler.lambda_handler",
@@ -109,16 +116,16 @@ class CdkBaseStack(Stack):
         # SNS Topic for successful pipeline completion
         self.completed_topic = sns.Topic(
             self,
-            "SleepAudioPipelineCompleted",
-            display_name="Sleep Audio Pipeline Completed",
+            f"SleepAudioPipelineCompleted{self.env_name.capitalize()}",
+            display_name=f"Sleep Audio Pipeline Completed ({self.env_name})",
             master_key=sns.Topic.DEFAULT_MASTER_KEY,  # Use default AWS managed KMS key
         )
         
         # SNS Topic for pipeline failures
         self.failed_topic = sns.Topic(
             self,
-            "SleepAudioPipelineFailed",
-            display_name="Sleep Audio Pipeline Failed",
+            f"SleepAudioPipelineFailed{self.env_name.capitalize()}",
+            display_name=f"Sleep Audio Pipeline Failed ({self.env_name})",
             master_key=sns.Topic.DEFAULT_MASTER_KEY,  # Use default AWS managed KMS key
         )
         
@@ -127,9 +134,10 @@ class CdkBaseStack(Stack):
         # CloudWatch Log Group for Step Functions state machine
         state_machine_log_group = logs.LogGroup(
             self,
-            "SleepAudioStateMachineLogGroup",
+            f"SleepAudioStateMachineLogGroup{self.env_name.capitalize()}",
             log_group_name="/aws/stepfunctions/sleep-audio-pipeline",
             removal_policy=RemovalPolicy.DESTROY,
+            retention=self.env_config["log_retention"],
         )
         
         # Define the Polly task - minimal placeholder for text-to-speech synthesis
@@ -359,7 +367,7 @@ class CdkBaseStack(Stack):
         # Create the state machine
         state_machine = sfn.StateMachine(
             self,
-            "SleepAudioPipelineStateMachine",
+            f"SleepAudioPipelineStateMachine{self.env_name.capitalize()}",
             state_machine_name="SleepAudioPipelineStateMachine",
             definition_body=sfn.DefinitionBody.from_chainable(state_machine_definition),
             logs=sfn.LogOptions(
@@ -367,7 +375,7 @@ class CdkBaseStack(Stack):
                 level=sfn.LogLevel.ALL,
                 include_execution_data=True,
             ),
-            tracing_enabled=True,  # Enable X-Ray tracing for observability
+            tracing_enabled=self.env_config["enable_xray"],  # X-Ray based on environment
         )
         
         # Grant the state machine permissions to write to output bucket
@@ -415,7 +423,7 @@ class CdkBaseStack(Stack):
         
         event_rule = events.Rule(
             self,
-            "SleepAudioInputRule",
+            f"SleepAudioInputRule{self.env_name.capitalize()}",
             description="Triggers audio processing when new files are uploaded to input bucket",
             event_pattern=events.EventPattern(
                 source=["aws.s3"],
@@ -444,3 +452,30 @@ class CdkBaseStack(Stack):
         event_rule.add_target(
             targets.CloudWatchLogGroup(log_group)
         )
+    
+    def _get_environment_config(self) -> dict:
+        """
+        Get environment-specific configuration settings.
+        
+        Returns:
+            dict: Configuration settings for the environment
+        """
+        configs = {
+            "dev": {
+                "log_retention": logs.RetentionDays.ONE_WEEK,
+                "enable_xray": False,
+                "description": "Development environment"
+            },
+            "stage": {
+                "log_retention": logs.RetentionDays.ONE_MONTH,
+                "enable_xray": True,
+                "description": "Staging environment"
+            },
+            "prod": {
+                "log_retention": logs.RetentionDays.THREE_MONTHS,
+                "enable_xray": True,
+                "description": "Production environment"
+            }
+        }
+        
+        return configs.get(self.env_name, configs["dev"])

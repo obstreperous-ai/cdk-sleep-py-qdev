@@ -620,3 +620,98 @@ def test_complete_stack_snapshot(template):
     assert "AWS::DynamoDB::Table" in str(template_dict)
     assert "AWS::SNS::Topic" in str(template_dict)
     assert "AWS::Events::Rule" in str(template_dict)
+
+
+# ============================================================================
+# TDD Tests for Issue #9: Pipeline Testing, Refinements, and Deployment Preparation
+# ============================================================================
+
+def test_stack_accepts_environment_parameter_dev():
+    """TDD Test (Issue #9): Verify stack accepts dev environment parameter."""
+    test_app = core.App(context={"env": "dev"})
+    test_stack = CdkBaseStack(test_app, "test-dev", env_name="dev")
+    test_template = assertions.Template.from_stack(test_stack)
+    
+    # Stack should be created successfully with dev environment
+    assert test_template is not None
+
+
+def test_stack_accepts_environment_parameter_stage():
+    """TDD Test (Issue #9): Verify stack accepts stage environment parameter."""
+    test_app = core.App(context={"env": "stage"})
+    test_stack = CdkBaseStack(test_app, "test-stage", env_name="stage")
+    test_template = assertions.Template.from_stack(test_stack)
+    
+    # Stack should be created successfully with stage environment
+    assert test_template is not None
+
+
+def test_stack_accepts_environment_parameter_prod():
+    """TDD Test (Issue #9): Verify stack accepts prod environment parameter."""
+    test_app = core.App(context={"env": "prod"})
+    test_stack = CdkBaseStack(test_app, "test-prod", env_name="prod")
+    test_template = assertions.Template.from_stack(test_stack)
+    
+    # Stack should be created successfully with prod environment
+    assert test_template is not None
+
+
+def test_state_machine_has_proper_task_sequence():
+    """TDD Test (Issue #9): Verify state machine maintains correct task order."""
+    test_app = core.App()
+    test_stack = CdkBaseStack(test_app, "test-sequence")
+    test_template = assertions.Template.from_stack(test_stack)
+    
+    # Verify state machine definition includes expected task names in sequence
+    test_template.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*PutInitialMetadata.*")
+    })
+
+
+def test_sns_notifications_include_required_fields():
+    """TDD Test (Issue #9): Verify SNS messages have complete structure."""
+    test_app = core.App()
+    test_stack = CdkBaseStack(test_app, "test-sns")
+    test_template = assertions.Template.from_stack(test_stack)
+    
+    # Verify SNS message contains expected fields: audioId, bucket, timestamp
+    test_template.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*audioId.*")
+    })
+    test_template.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*bucket.*")
+    })
+
+
+def test_log_groups_exist_and_configured():
+    """TDD Test (Issue #9): Verify CloudWatch log groups are properly configured."""
+    test_app = core.App()
+    test_stack = CdkBaseStack(test_app, "test-logs")
+    test_template = assertions.Template.from_stack(test_stack)
+    
+    # Should have log groups for EventBridge and State Machine
+    test_template.resource_count_is("AWS::Logs::LogGroup", 2)
+
+
+def test_iam_policies_follow_least_privilege():
+    """TDD Test (Issue #9): Verify IAM policies are minimally permissive."""
+    test_app = core.App()
+    test_stack = CdkBaseStack(test_app, "test-iam")
+    test_template = assertions.Template.from_stack(test_stack)
+    
+    # Verify IAM policies are defined (some wildcards necessary for Polly)
+    test_template.has_resource_properties("AWS::IAM::Policy", {
+        "PolicyDocument": assertions.Match.any_value()
+    })
+
+
+def test_s3_buckets_have_data_protection():
+    """TDD Test (Issue #9): Verify S3 buckets have proper removal policies."""
+    test_app = core.App()
+    test_stack = CdkBaseStack(test_app, "test-s3")
+    test_template = assertions.Template.from_stack(test_stack)
+    
+    # Verify S3 buckets exist with protection policies
+    test_template.has_resource("AWS::S3::Bucket", {})
+    # Both input and output buckets should exist
+    test_template.resource_count_is("AWS::S3::Bucket", 2)

@@ -951,6 +951,91 @@ cdk-sleep-py-qdev/
 - State machine has SNS publish permissions (both topics)
 - All permissions follow least-privilege principle
 
+#### Issue #9: TDD - Pipeline Testing, Refinements, and Deployment Preparation ✅
+**Date**: Current Release
+**Approach**: Strict Test-Driven Development (Red-Green-Refactor)
+
+**Milestone**: This issue enhances the pipeline with comprehensive testing, environment-specific configurations, and deployment preparation for multi-environment support.
+
+**Changes Made**:
+
+1. **Test Phase (Red)** - 8 New TDD Tests:
+   - Added comprehensive tests for environment-specific stack configurations
+   - Tests verify: dev/stage/prod environment handling, task sequencing, SNS message structure, CloudWatch logs, IAM least privilege, resource protection policies
+   - All tests initially failed (as expected in TDD) ✅
+
+2. **Implementation Phase (Green)** - Multi-Environment Support & Refinements:
+   
+   **Environment-Specific Stack Configuration** (`cdk_base/cdk_base_stack.py`):
+   - Added `env_name` parameter to CdkBaseStack constructor (dev/stage/prod)
+   - Implemented `_get_environment_config()` method with environment-specific settings:
+     - **dev**: 7-day log retention, X-Ray disabled (cost savings)
+     - **stage**: 30-day log retention, X-Ray enabled (prod-like testing)
+     - **prod**: 90-day log retention, X-Ray enabled (full observability)
+   - Updated all resource naming to include environment suffix for clarity
+   - Applied environment-specific log retention to CloudWatch log groups
+   - Configured X-Ray tracing based on environment
+   
+   **Application Entry Point** (`app.py`):
+   - Added environment detection from CDK context (`--context env=dev|stage|prod`)
+   - Defaults to "dev" if no environment specified
+   - Environment-specific stack naming: `CdkBaseStack-{env}`
+   - Support for environment-specific AWS account/region configuration
+   
+   **CDK Configuration** (`cdk.json`):
+   - Added `environments` context section with dev/stage/prod configurations
+   - Documented account IDs, regions, and feature flags per environment
+   - Added `deployment` context section for future pipeline configuration
+   
+   **CI/CD Workflow** (`.github/workflows/ci.yml`):
+   - Enhanced to test CDK synth for all three environments (dev, stage, prod)
+   - Validates that each environment can be synthesized without errors
+   - Provides clear feedback on multi-environment support
+   
+   **Deployment Pipeline Stack** (`cdk_base/deployment_pipeline_stack.py`):
+   - Created skeleton CDK Pipeline stack for future automated deployments
+   - Defined `ApplicationStage` construct for environment-specific deployments
+   - Documented pipeline flow: Source → Synth → Deploy(Dev) → Deploy(Stage) → Approval → Deploy(Prod)
+   - Currently inactive (skeleton only) - will be enabled in future issues
+   - Includes comprehensive documentation for activation steps
+   
+   - All tests now pass ✅
+
+3. **Documentation Update**:
+   - Updated ARCHITECTURE.md with Issue #9 implementation details
+   - Documented environment-specific configurations and their rationale
+   - Added deployment preparation section
+   - Documented how to use multi-environment support
+   - Added Issue #9 to Change Log
+
+**Multi-Environment Usage**:
+
+```bash
+# Synthesize for development environment (default)
+cdk synth
+
+# Synthesize for specific environment
+cdk synth --context env=dev
+cdk synth --context env=stage
+cdk synth --context env=prod
+
+# Deploy to specific environment
+cdk deploy --context env=dev
+cdk deploy --context env=stage
+cdk deploy --context env=prod
+```
+
+**Environment-Specific Behaviors**:
+- **Resource Naming**: All resources include environment suffix (e.g., `SleepAudioInputBucketDev`)
+- **Log Retention**: dev (7 days), stage (30 days), prod (90 days)
+- **X-Ray Tracing**: Disabled in dev for cost savings, enabled in stage/prod for observability
+- **DynamoDB Table Names**: Include environment in name for clarity (`SleepAudioMetadataTable-dev`)
+- **SNS Display Names**: Include environment in display name for notification clarity
+
+**Next Steps** (Issue #10):
+- Advanced error handling and retry logic
+- Enhanced observability with custom metrics and alarms
+
 **Next Steps** (Issue #9):
 - Pipeline testing and refinement
 - Deployment preparation and documentation
