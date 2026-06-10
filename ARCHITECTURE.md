@@ -1077,3 +1077,136 @@ cdk deploy --context env=prod
 **Next Steps** (Issue #9):
 - Pipeline testing and refinement
 - Deployment preparation and documentation
+
+#### Issue #10: Advanced Error Handling, Retry Policies, and Observability (TDD Implementation) ✅
+**Date**: Previous Release
+**Approach**: Strict Test-Driven Development (Red-Green-Refactor)
+
+**Milestone**: This issue transforms the pipeline into a production-ready system with comprehensive error handling, retry mechanisms, and full observability.
+
+**Changes Made**:
+
+1. **Test Phase (Red)** - 10 New TDD Tests:
+   - Added comprehensive tests for retry policies, X-Ray tracing, and CloudWatch alarms
+   - Tests verify: Lambda retry with exponential backoff, Polly task retry, DynamoDB retry, Lambda X-Ray tracing, State Machine X-Ray tracing, CloudWatch alarms for state machine failures, CloudWatch alarms for Lambda errors, SNS alarm notifications
+   - All tests initially failed (as expected in TDD) ✅
+
+2. **Implementation Phase (Green)** - Retry Policies & Observability:
+   
+   **Retry Policies** (`cdk_base/cdk_base_stack.py`):
+   - Added retry policies to all Step Functions tasks with exponential backoff (2.0 rate)
+   - Lambda invocation: 3 attempts, 2-second interval (handles service errors, throttling)
+   - Polly task: 2 attempts, 2-second interval (handles Polly service errors)
+   - DynamoDB operations: 3 attempts, 1-second interval (handles throughput throttling)
+   - Error-specific retry: Lambda.*, Polly.*, DynamoDB.*, States.Timeout
+   
+   **X-Ray Tracing**:
+   - Enabled X-Ray distributed tracing on Lambda function (ACTIVE mode)
+   - Enabled X-Ray on Step Functions state machine (environment-specific: disabled in dev, enabled in stage/prod)
+   - Provides end-to-end request flow visualization and service dependency maps
+   
+   **CloudWatch Alarms**:
+   - State Machine failure alarm: Monitors ExecutionsFailed metric (threshold >= 1, 5-min period)
+   - Lambda error alarm: Monitors Lambda Errors metric (threshold >= 5, 5-min period)
+   - Both alarms publish notifications to failed SNS topic for immediate operations team alerts
+   
+   **Enhanced Error Handling**:
+   - Added specific error type catching (Lambda.ServiceException, Polly.ServiceException, DynamoDB.ConditionalCheckFailedException)
+   - Maintained catch-all fallback (States.ALL) for unhandled exceptions
+   - Error context includes error message, original input, timestamp for troubleshooting
+   
+   **Structured Logging** (`lambda/audio_processor/handler.py`):
+   - Added `log_structured()` function for JSON-formatted logs
+   - Logs include timestamp, level, message, request_id, and custom context
+   - Integrated structured logging throughout Lambda handler for better observability
+   
+   - All tests now pass ✅
+
+3. **Documentation Update**:
+   - Updated ARCHITECTURE.md with retry policies, error handling strategies, and observability features
+   - Added CloudWatch alarm details with metric thresholds
+   - Documented X-Ray tracing configuration
+   - Added Issue #10 to Change Log
+
+#### Issue #11: Core Audio Processing Logic & Output Handling (TDD Implementation) ✅
+**Date**: Current Release
+**Approach**: Strict Test-Driven Development (Red-Green-Refactor)
+
+**Milestone**: This issue transitions the pipeline from a skeleton to a **fully functional audio processing system**. The Lambda function now performs real audio processing, including downloading from S3, processing audio/text files with Polly, uploading to output S3, and updating DynamoDB with output metadata.
+
+**Changes Made**:
+
+1. **Test Phase (Red)** - 5 New TDD Tests:
+   - Added comprehensive tests for Lambda audio processing capabilities
+   - Tests verify: Lambda S3 read permissions (input bucket), Lambda S3 write permissions (output bucket), Lambda Polly SynthesizeSpeech permissions, Lambda DynamoDB UpdateItem permissions, Lambda OUTPUT_BUCKET_NAME environment variable
+   - All tests initially failed (as expected in TDD) ✅
+
+2. **Implementation Phase (Green)** - Core Audio Processing:
+   
+   **Lambda Handler Enhancement** (`lambda/audio_processor/handler.py`):
+   - Added `download_from_s3()` function to download input files from S3 using boto3
+   - Added `upload_to_s3()` function to upload processed audio to output S3 bucket with proper content type
+   - Added `process_text_with_polly()` function to convert text to speech using Amazon Polly Neural TTS (Joanna voice)
+     - Handles text truncation to Polly's 3000 character limit
+     - Returns MP3 audio stream as bytes
+   - Added `process_audio_file()` function for audio file passthrough (future: normalization, enhancement)
+   - Added `update_dynamodb_with_output()` function to update DynamoDB with output location, file size, and timestamp
+   - Enhanced `lambda_handler()` to:
+     - Download input file from S3 after validation
+     - Process text files with Polly or passthrough audio files
+     - Upload processed audio to output bucket with naming convention: `processed/{audio_id}`
+     - Update DynamoDB with output metadata (outputLocation, outputFileSize, updatedAt)
+     - Return structured response including output location and processing time
+   - Comprehensive structured logging throughout processing pipeline
+   - All AWS clients initialized at module level (s3_client, polly_client, dynamodb resource)
+   
+   **CDK Stack Enhancement** (`cdk_base/cdk_base_stack.py`):
+   - Added `OUTPUT_BUCKET_NAME` environment variable to Lambda function
+   - Increased Lambda timeout from 30 seconds to 300 seconds (5 minutes) for audio processing
+   - Granted Lambda S3 GetObject permission on input bucket (download files)
+   - Granted Lambda S3 PutObject permission on output bucket (upload processed audio)
+   - Granted Lambda DynamoDB read/write permissions (update with output metadata)
+   - Granted Lambda Polly SynthesizeSpeech permission for text-to-speech conversion
+   - Updated Lambda function description to reflect audio processing capabilities
+   
+   - All tests now pass ✅
+
+3. **Documentation Update**:
+   - Updated ARCHITECTURE.md with Issue #11 implementation details
+   - Documented real audio processing capabilities
+   - Updated Lambda function configuration (timeout, permissions, environment variables)
+   - Added Issue #11 to Change Log
+
+**Real Audio Processing Flow (Issue #11)**:
+
+1. **Download Phase**: Lambda downloads input file from S3 Input Bucket
+2. **Processing Phase**:
+   - **Text Files (.txt)**: Convert to speech using Polly Neural TTS (Joanna voice) → Output as MP3
+   - **Audio Files (.mp3, .wav, etc.)**: Passthrough (future: normalize, enhance, mix with ambient sounds)
+3. **Upload Phase**: Upload processed audio to S3 Output Bucket with naming convention `processed/{audio_id}` or `processed/{audio_id_without_ext}.mp3` for text files
+4. **Metadata Update**: Update DynamoDB record with:
+   - `outputLocation`: S3 URI (e.g., `s3://bucket-name/processed/file.mp3`)
+   - `outputFileSize`: Size in bytes
+   - `updatedAt`: ISO 8601 timestamp
+5. **Response**: Return structured response to Step Functions including output location and processing metrics
+
+**Key Features**:
+- **Production-Ready**: Real audio download, processing, upload, and metadata tracking
+- **Text-to-Speech**: Amazon Polly Neural engine for high-quality, natural-sounding speech
+- **Scalable**: Processes files up to Lambda's limits (300-second timeout, sufficient for most audio files)
+- **Metadata Tracking**: Complete audit trail in DynamoDB with input/output locations and processing status
+- **Error Handling**: Comprehensive error handling with structured logging for troubleshooting
+- **Security**: Least-privilege IAM permissions (S3 read/write, Polly synthesize, DynamoDB update)
+
+**Future Enhancements** (Post-Issue #11):
+- Audio normalization and enhancement for uploaded audio files
+- Mixing multiple audio tracks (voice + background music + binaural beats)
+- Support for additional Polly voices and languages
+- Audio metadata extraction (duration, bitrate, codec) using ffprobe or similar
+- Large file support with S3 multipart upload for files > 5GB
+- Integration with Amazon Bedrock for AI-generated ambient sounds
+
+**Next Issue** (Issue #12):
+- End-to-end validation and integration testing
+- Documentation polish and finalization
+- Project completion and production readiness verification
