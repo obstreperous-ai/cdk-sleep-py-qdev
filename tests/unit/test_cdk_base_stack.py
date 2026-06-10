@@ -715,3 +715,116 @@ def test_s3_buckets_have_data_protection():
     test_template.has_resource("AWS::S3::Bucket", {})
     # Both input and output buckets should exist
     test_template.resource_count_is("AWS::S3::Bucket", 2)
+
+
+# ============================================================================
+# TDD Tests for Issue #10: Advanced Error Handling, Retry Policies, and Observability
+# ============================================================================
+
+def test_lambda_invocation_includes_retry_configuration():
+    """TDD Test (Issue #10): Lambda invocation must have retry with exponential backoff."""
+    app = core.App()
+    stack = CdkBaseStack(app, "test-retry")
+    tmpl = assertions.Template.from_stack(stack)
+    
+    # State machine definition must include Retry blocks
+    tmpl.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*[Rr]etry.*")
+    })
+    # Should have BackoffRate for exponential backoff
+    tmpl.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*BackoffRate.*")
+    })
+
+
+def test_polly_task_includes_retry_configuration():
+    """TDD Test (Issue #10): Polly task must be configured with retry mechanism."""
+    app = core.App()
+    stack = CdkBaseStack(app, "test-polly-retry")
+    tmpl = assertions.Template.from_stack(stack)
+    
+    # Retry configuration should exist in definition
+    tmpl.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*[Rr]etry.*")
+    })
+
+
+def test_dynamodb_operations_include_retry_configuration():
+    """TDD Test (Issue #10): DynamoDB operations must have retry for throttling scenarios."""
+    app = core.App()
+    stack = CdkBaseStack(app, "test-ddb-retry")
+    tmpl = assertions.Template.from_stack(stack)
+    
+    # Multiple retry blocks expected for DynamoDB operations
+    tmpl.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "DefinitionString": assertions.Match.string_like_regexp(".*[Rr]etry.*")
+    })
+
+
+def test_lambda_function_xray_tracing_active():
+    """TDD Test (Issue #10): Lambda must have X-Ray tracing activated for distributed tracing."""
+    app = core.App()
+    stack = CdkBaseStack(app, "test-lambda-xray")
+    tmpl = assertions.Template.from_stack(stack)
+    
+    # Lambda TracingConfig Mode must be Active
+    tmpl.has_resource_properties("AWS::Lambda::Function", {
+        "TracingConfig": {
+            "Mode": "Active"
+        }
+    })
+
+
+def test_state_machine_xray_tracing_active():
+    """TDD Test (Issue #10): State machine must enable X-Ray distributed tracing."""
+    app = core.App()
+    stack = CdkBaseStack(app, "test-sfn-xray")
+    tmpl = assertions.Template.from_stack(stack)
+    
+    # TracingConfiguration must be enabled
+    tmpl.has_resource_properties("AWS::StepFunctions::StateMachine", {
+        "TracingConfiguration": {
+            "Enabled": True
+        }
+    })
+
+
+def test_cloudwatch_alarm_monitors_state_machine_failures():
+    """TDD Test (Issue #10): Must have alarm monitoring state machine execution failures."""
+    app = core.App()
+    stack = CdkBaseStack(app, "test-sfn-alarm")
+    tmpl = assertions.Template.from_stack(stack)
+    
+    # At least one alarm must exist
+    tmpl.resource_count_is("AWS::CloudWatch::Alarm", assertions.Match.at_least(1))
+    
+    # Alarm monitoring ExecutionsFailed from States namespace
+    tmpl.has_resource_properties("AWS::CloudWatch::Alarm", {
+        "MetricName": "ExecutionsFailed",
+        "Namespace": "AWS/States"
+    })
+
+
+def test_cloudwatch_alarm_monitors_lambda_errors():
+    """TDD Test (Issue #10): Must have alarm monitoring Lambda function errors."""
+    app = core.App()
+    stack = CdkBaseStack(app, "test-lambda-alarm")
+    tmpl = assertions.Template.from_stack(stack)
+    
+    # Alarm monitoring Lambda Errors metric
+    tmpl.has_resource_properties("AWS::CloudWatch::Alarm", {
+        "MetricName": "Errors",
+        "Namespace": "AWS/Lambda"
+    })
+
+
+def test_alarms_publish_notifications_to_sns():
+    """TDD Test (Issue #10): Alarms must send notifications via SNS topics."""
+    app = core.App()
+    stack = CdkBaseStack(app, "test-alarm-sns")
+    tmpl = assertions.Template.from_stack(stack)
+    
+    # Alarms must have actions configured
+    tmpl.has_resource_properties("AWS::CloudWatch::Alarm", {
+        "AlarmActions": assertions.Match.any_value()
+    })

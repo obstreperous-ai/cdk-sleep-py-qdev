@@ -1,6 +1,7 @@
 from aws_cdk import (
     Stack,
     aws_s3 as s3,
+    aws_cloudwatch as cloudwatch,
     aws_lambda as lambda_,
     aws_sns as sns,
     aws_dynamodb as dynamodb,
@@ -85,7 +86,7 @@ class CdkBaseStack(Stack):
         # ====================================================================
         # Issue #6: SNS Topics for Pipeline Notifications
         # ====================================================================
-        # Issue #7: Lambda Function for Audio Processing
+        # Issue #7 & #10: Lambda Function for Audio Processing with X-Ray
         # ====================================================================
         
         # Lambda function for audio processing - placeholder for future validation,
@@ -102,6 +103,7 @@ class CdkBaseStack(Stack):
             },
             description="Audio processor Lambda for validation and metadata enrichment",
             timeout=Duration.seconds(30),  # 30 second timeout for processing
+            tracing=lambda_.Tracing.ACTIVE,  # Issue #10: Enable X-Ray tracing
         )
         
         # Grant Lambda function read access to DynamoDB table (for future enhancements)
@@ -169,6 +171,16 @@ class CdkBaseStack(Stack):
         )
         
         # ====================================================================
+        # Issue #10: Add retry policy for DynamoDB throttling
+        put_metadata_task.add_retry(
+            errors=["DynamoDB.ProvisionedThroughputExceededException", "States.Timeout"],
+            interval=Duration.seconds(1),
+            max_attempts=3,
+            backoff_rate=2.0
+        )
+        
+        # ====================================================================
+        # Issue #10: Retry Policies and Advanced Error Handling
         # Issue #7: Lambda Invocation Task
         # ====================================================================
         
@@ -183,6 +195,14 @@ class CdkBaseStack(Stack):
         )
         
         # This uses StartSpeechSynthesisTask for async processing
+        # Issue #10: Add retry policy for Lambda with exponential backoff
+        invoke_audio_processor.add_retry(
+            errors=["Lambda.ServiceException", "Lambda.TooManyRequestsException", "States.Timeout"],
+            interval=Duration.seconds(2),
+            max_attempts=3,
+            backoff_rate=2.0
+        )
+        
         polly_task = tasks.CallAwsService(
             self,
             "PollyTextToSpeech",
@@ -202,6 +222,14 @@ class CdkBaseStack(Stack):
         )
         
         # ====================================================================
+        # Issue #10: Add retry policy for Polly service errors
+        polly_task.add_retry(
+            errors=["Polly.ServiceException", "States.Timeout"],
+            interval=Duration.seconds(2),
+            max_attempts=2,
+            backoff_rate=2.0
+        )
+        
         # Issue #6: Error Handling and Status Updates
         # ====================================================================
         
@@ -230,6 +258,14 @@ class CdkBaseStack(Stack):
         )
         
         # SUCCESS PATH: Publish success notification to SNS
+        # Issue #10: Add retry policy for DynamoDB UpdateItem
+        update_status_completed.add_retry(
+            errors=["DynamoDB.ProvisionedThroughputExceededException", "States.Timeout"],
+            interval=Duration.seconds(1),
+            max_attempts=3,
+            backoff_rate=2.0
+        )
+        
         publish_success = tasks.SnsPublish(
             self,
             "PublishSuccessNotification",
@@ -274,6 +310,14 @@ class CdkBaseStack(Stack):
         )
         
         # ERROR PATH: Publish error notification to SNS
+        # Issue #10: Add retry policy for error path DynamoDB operations
+        update_status_failed.add_retry(
+            errors=["DynamoDB.ProvisionedThroughputExceededException", "States.Timeout"],
+            interval=Duration.seconds(1),
+            max_attempts=3,
+            backoff_rate=2.0
+        )
+        
         publish_error = tasks.SnsPublish(
             self,
             "PublishErrorNotification",
@@ -297,12 +341,12 @@ class CdkBaseStack(Stack):
         # Issue #8: Add Error Handling to Lambda Invocation
         # ====================================================================
         
-        # Add error handling (Catch) to Lambda invocation task
+        # Issue #10: Enhanced with specific error types
         # This catches validation errors and other Lambda failures
-        invoke_audio_processor.add_catch(
+        # Catches specific Lambda errors plus generic fallback
             lambda_error_handler_chain,
             errors=["States.ALL"],
-            result_path="$.errorInfo"
+            errors=["Lambda.ServiceException", "Lambda.Unknown", "States.TaskFailed", "States.ALL"],
         )
         
         # Add error handling (Catch) to Polly task (already exists, updating for consistency)
@@ -351,9 +395,11 @@ class CdkBaseStack(Stack):
         )
         
         polly_task.add_catch(
+        # Issue #10: Enhanced with specific Polly and DynamoDB error types
             polly_error_handler_chain,
             errors=["States.ALL"],
-            result_path="$.errorInfo"
+            errors=["Polly.ServiceException", "Polly.InvalidParameterException", 
+                   "DynamoDB.ConditionalCheckFailedException", "States.TaskFailed", "States.ALL"],
         )
         
         # Chain the success path: Polly → update status → publish notification
@@ -378,6 +424,53 @@ class CdkBaseStack(Stack):
             tracing_enabled=self.env_config["enable_xray"],  # X-Ray based on environment
         )
         
+        # ====================================================================
+        # Issue #10: CloudWatch Alarms for Observability
+        # ====================================================================
+        
+        # Alarm for State Machine execution failures
+        state_machine_failure_alarm = cloudwatch.Alarm(
+            self,
+            f"StateMachineFailureAlarm{self.env_name.capitalize()}",
+            alarm_name=f"SleepAudioPipeline-StateMachineFailures-{self.env_name}",
+            alarm_description="Alert when Step Functions executions fail",
+            metric=state_machine.metric_failed(
+                period=Duration.minutes(5),
+                statistic="Sum"
+            ),
+            threshold=1,
+            evaluation_periods=1,
+            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+            treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
+        )
+        
+        # Link alarm to failed SNS topic for notifications
+        state_machine_failure_alarm.add_alarm_action(
+            cloudwatch.actions.SnsAction(self.failed_topic)
+        )
+        
+        # Alarm for Lambda function errors
+        lambda_error_alarm = cloudwatch.Alarm(
+            self,
+            f"LambdaErrorAlarm{self.env_name.capitalize()}",
+            alarm_name=f"SleepAudioPipeline-LambdaErrors-{self.env_name}",
+            alarm_description="Alert when Lambda function error rate exceeds threshold",
+            metric=self.audio_processor_lambda.metric_errors(
+                period=Duration.minutes(5),
+                statistic="Sum"
+            ),
+            threshold=5,
+            evaluation_periods=1,
+            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+            treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
+        )
+        
+        # Link Lambda error alarm to failed SNS topic
+        lambda_error_alarm.add_alarm_action(
+            cloudwatch.actions.SnsAction(self.failed_topic)
+        )
+        
+        # Grant the state machine permissions to write to output bucket
         # Grant the state machine permissions to write to output bucket
         # (Polly needs to write generated audio to S3)
         self.output_bucket.grant_put(state_machine)
