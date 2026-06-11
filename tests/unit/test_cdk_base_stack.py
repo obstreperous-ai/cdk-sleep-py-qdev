@@ -828,3 +828,107 @@ def test_alarms_publish_notifications_to_sns():
     tmpl.has_resource_properties("AWS::CloudWatch::Alarm", {
         "AlarmActions": assertions.Match.any_value()
     })
+
+
+# ============================================================================
+# TDD Tests for Issue #11: Core Audio Processing Logic & Output Handling
+# ============================================================================
+
+def test_lambda_has_s3_read_permissions_for_input_bucket():
+    """TDD Test (Issue #11): Lambda must have S3 GetObject permissions for input bucket."""
+    app = core.App()
+    stack = CdkBaseStack(app, "test-lambda-s3-read")
+    tmpl = assertions.Template.from_stack(stack)
+    
+    # Lambda role should have S3 read permissions
+    tmpl.has_resource_properties("AWS::IAM::Policy", {
+        "PolicyDocument": {
+            "Statement": assertions.Match.array_with([
+                assertions.Match.object_like({
+                    "Action": assertions.Match.array_with([
+                        "s3:GetObject"
+                    ]),
+                    "Effect": "Allow"
+                })
+            ])
+        }
+    })
+
+
+def test_lambda_has_s3_write_permissions_for_output_bucket():
+    """TDD Test (Issue #11): Lambda must have S3 PutObject permissions for output bucket."""
+    app = core.App()
+    stack = CdkBaseStack(app, "test-lambda-s3-write")
+    tmpl = assertions.Template.from_stack(stack)
+    
+    # Lambda role should have S3 write permissions
+    tmpl.has_resource_properties("AWS::IAM::Policy", {
+        "PolicyDocument": {
+            "Statement": assertions.Match.array_with([
+                assertions.Match.object_like({
+                    "Action": assertions.Match.array_with([
+                        "s3:PutObject"
+                    ]),
+                    "Effect": "Allow"
+                })
+            ])
+        }
+    })
+
+
+def test_lambda_has_polly_synthesize_speech_permissions():
+    """TDD Test (Issue #11): Lambda must have Polly SynthesizeSpeech permissions."""
+    app = core.App()
+    stack = CdkBaseStack(app, "test-lambda-polly")
+    tmpl = assertions.Template.from_stack(stack)
+    
+    # Lambda role should have Polly synthesize speech permissions
+    tmpl.has_resource_properties("AWS::IAM::Policy", {
+        "PolicyDocument": {
+            "Statement": assertions.Match.array_with([
+                assertions.Match.object_like({
+                    "Action": assertions.Match.array_with([
+                        assertions.Match.string_like_regexp("polly:SynthesizeSpeech")
+                    ]),
+                    "Effect": "Allow"
+                })
+            ])
+        }
+    })
+
+
+def test_lambda_has_dynamodb_update_permissions():
+    """TDD Test (Issue #11): Lambda must have DynamoDB UpdateItem permissions."""
+    app = core.App()
+    stack = CdkBaseStack(app, "test-lambda-ddb-write")
+    tmpl = assertions.Template.from_stack(stack)
+    
+    # Lambda role should have DynamoDB update permissions
+    tmpl.has_resource_properties("AWS::IAM::Policy", {
+        "PolicyDocument": {
+            "Statement": assertions.Match.array_with([
+                assertions.Match.object_like({
+                    "Action": assertions.Match.array_with([
+                        assertions.Match.string_like_regexp("dynamodb:UpdateItem")
+                    ]),
+                    "Effect": "Allow"
+                })
+            ])
+        }
+    })
+
+
+def test_lambda_has_output_bucket_environment_variable():
+    """TDD Test (Issue #11): Lambda must have OUTPUT_BUCKET_NAME environment variable."""
+    app = core.App()
+    stack = CdkBaseStack(app, "test-lambda-env-output")
+    tmpl = assertions.Template.from_stack(stack)
+    
+    # Lambda should have OUTPUT_BUCKET_NAME in environment variables
+    tmpl.has_resource_properties("AWS::Lambda::Function", {
+        "Environment": {
+            "Variables": assertions.Match.object_like({
+                "OUTPUT_BUCKET_NAME": assertions.Match.any_value()
+            })
+        }
+    })

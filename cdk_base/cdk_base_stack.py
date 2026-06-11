@@ -88,9 +88,10 @@ class CdkBaseStack(Stack):
         # ====================================================================
         # Issue #7 & #10: Lambda Function for Audio Processing with X-Ray
         # ====================================================================
+        # Issue #11: Enhanced Lambda with S3 and Polly Permissions for Real Processing
         
         # Lambda function for audio processing - placeholder for future validation,
-        # metadata enrichment, or other processing logic
+        # metadata enrichment, or other processing logic. Now includes real audio processing.
         self.audio_processor_lambda = lambda_.Function(
             self,
             f"SleepAudioProcessor{self.env_name.capitalize()}",
@@ -100,16 +101,36 @@ class CdkBaseStack(Stack):
             code=lambda_.Code.from_asset("lambda/audio_processor"),
             environment={
                 "TABLE_NAME": self.metadata_table.table_name,
+                "OUTPUT_BUCKET_NAME": self.output_bucket.bucket_name,
             },
             description="Audio processor Lambda for validation and metadata enrichment",
-            timeout=Duration.seconds(30),  # 30 second timeout for processing
+            timeout=Duration.seconds(300),  # 5 minute timeout for audio processing
             tracing=lambda_.Tracing.ACTIVE,  # Issue #10: Enable X-Ray tracing
         )
         
-        # Grant Lambda function read access to DynamoDB table (for future enhancements)
-        # Currently the Lambda just logs and returns, but this permission enables
-        # future features like reading existing metadata or updating records
-        self.metadata_table.grant_read_data(self.audio_processor_lambda)
+        # ====================================================================
+        # Issue #11: Grant Lambda Permissions for Audio Processing
+        # ====================================================================
+        
+        # Grant Lambda read access to input bucket (download audio files)
+        self.input_bucket.grant_read(self.audio_processor_lambda)
+        
+        # Grant Lambda write access to output bucket (upload processed audio)
+        self.output_bucket.grant_put(self.audio_processor_lambda)
+        
+        # Grant Lambda read and write access to DynamoDB table
+        self.metadata_table.grant_read_write_data(self.audio_processor_lambda)
+        
+        # Grant Lambda permissions to use Polly for text-to-speech
+        self.audio_processor_lambda.add_to_role_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "polly:SynthesizeSpeech",
+                ],
+                resources=["*"],  # Polly doesn't support resource-level permissions
+            )
+        )
         
         # ====================================================================
         # Issue #6: SNS Topics for Pipeline Notifications
@@ -345,8 +366,8 @@ class CdkBaseStack(Stack):
         # This catches validation errors and other Lambda failures
         # Catches specific Lambda errors plus generic fallback
             lambda_error_handler_chain,
+        invoke_audio_processor.add_catch(
             errors=["States.ALL"],
-            errors=["Lambda.ServiceException", "Lambda.Unknown", "States.TaskFailed", "States.ALL"],
         )
         
         # Add error handling (Catch) to Polly task (already exists, updating for consistency)
@@ -395,10 +416,9 @@ class CdkBaseStack(Stack):
         )
         
         polly_task.add_catch(
-        # Issue #10: Enhanced with specific Polly and DynamoDB error types
             polly_error_handler_chain,
+        polly_task.add_catch(
             errors=["States.ALL"],
-            errors=["Polly.ServiceException", "Polly.InvalidParameterException", 
                    "DynamoDB.ConditionalCheckFailedException", "States.TaskFailed", "States.ALL"],
         )
         
