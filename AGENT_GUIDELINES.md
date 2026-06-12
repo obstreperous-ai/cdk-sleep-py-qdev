@@ -241,6 +241,7 @@ def test_lambda_has_minimal_iam_permissions():
 ### Internal Documentation
 - **[ARCHITECTURE.md](ARCHITECTURE.md)**: System architecture and design
 - **[README.md](README.md)**: Project setup and quick start guide
+- **[META-PROMPTS.md](META-PROMPTS.md)**: Reusable meta-prompting patterns for TDD IaC projects
 - **[CONTRIBUTING.md](CONTRIBUTING.md)**: Contribution guidelines (if exists)
 
 ### AWS CDK Resources
@@ -304,6 +305,14 @@ If you encounter ambiguity or need clarification:
 3. **Ask in Issue Comments**: Tag maintainers for guidance
 4. **Propose Changes**: If architecture needs adjustment, open a discussion
 
+## Reusable Patterns for Future Projects
+
+The **[META-PROMPTS.md](META-PROMPTS.md)** file contains extracted reusable patterns from this project:
+- TDD workflow prompts for AI agents
+- Issue-driven development templates
+- Security and observability checklists
+- Multi-environment configuration patterns
+
 ## Summary Checklist
 ## Project Completion Notes (Issue #12)
 
@@ -346,5 +355,7 @@ Before submitting any pull request:
 
 **Remember**: 
 - ARCHITECTURE.md is the source of truth for system design
+- META-PROMPTS.md contains reusable patterns for future TDD IaC projects
+- README.md is the comprehensive entry point for new contributors
 - SUMMARY.md contains key decisions and deployment guidance
 - All features were implemented following strict TDD (Red-Green-Refactor-Document)
