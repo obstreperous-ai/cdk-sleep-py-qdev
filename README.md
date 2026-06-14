@@ -13,6 +13,7 @@ A production-ready, event-driven serverless AWS solution for processing audio fi
 ## 📋 Table of Contents
 
 - [Overview](#overview)
+- [Experiment Design](#experiment-design)
 - [Architecture](#architecture)
 - [Key Features](#key-features)
 - [Quick Start](#quick-start)
@@ -31,6 +32,17 @@ A production-ready, event-driven serverless AWS solution for processing audio fi
 ## 🎯 Overview
 
 The **Sleep Audio Pipeline** is a serverless AWS solution designed to process audio files for sleep and relaxation applications. The project was built as a **TDD IaC experiment** using strict Test-Driven Development principles, demonstrating how infrastructure can be developed with the same rigor as application code.
+
+### 🔬 Part of Experimental Series
+
+This project is part of a larger **experimental series** exploring TDD Infrastructure as Code with AI agents:
+
+- **Series**: 5 programming languages × 3 AI agents = 15 parallel experiments
+- **This Repository**: Python + Amazon Q Developer variant
+- **Experiment Document**: **[EXPERIMENT.md](EXPERIMENT.md)** - Complete methodology, actors, prompting strategy, and observations
+
+The experiment serves as the foundation for evaluation (Issue #15) and cross-comparison with other variants.
+
 
 ### Goals
 
@@ -233,6 +245,7 @@ cdk-sleep-py-qdev/
 ├── AGENT_GUIDELINES.md          # 🤖 Agent/developer guidelines
 ├── SUMMARY.md                   # 📋 Project summary and completion notes
 ├── META-PROMPTS.md              # 🧠 Reusable meta-prompting patterns
+├── EXPERIMENT.md                # 🔬 Experiment design document
 └── README.md                    # 📖 This file
 ```
 
@@ -264,7 +277,11 @@ The **[META-PROMPTS.md](META-PROMPTS.md)** file extracts reusable patterns for:
 - Issue-driven development
 - Documentation synchronization
 
-These patterns can be applied to future CDK projects or other IaC tools.
+### Experiment Design Document
+
+The **[EXPERIMENT.md](EXPERIMENT.md)** captures the complete experimental methodology, actors, prompting strategy, and observations from this TDD IaC project. It serves as the foundation for evaluation and cross-comparison with other language/AI variants.
+
+For full details, see **[EXPERIMENT.md](EXPERIMENT.md)**, **[AGENT_GUIDELINES.md](AGENT_GUIDELINES.md)**, and **[SUMMARY.md](SUMMARY.md)**.
 
 For full details, see **[AGENT_GUIDELINES.md](AGENT_GUIDELINES.md)** and **[SUMMARY.md](SUMMARY.md)**.
 
@@ -354,10 +371,11 @@ timeout=Duration.seconds(600)  # 10 minutes
 
 This project includes comprehensive documentation:
 
-| Document | Description |
+| **[README.md](README.md)** | 📖 This file - comprehensive project overview and quick start |
 |----------|-------------|
+| **[EXPERIMENT.md](EXPERIMENT.md)** | 🔬 Experiment design, methodology, actors, prompting strategy, and observations |
 | **[README.md](README.md)** | 📖 This file - project overview and quick start |
-| **[ARCHITECTURE.md](ARCHITECTURE.md)** | 🏗️ Complete technical architecture, diagrams, service rationale (source of truth) |
+| **[SUMMARY.md](SUMMARY.md)** | 📋 Project completion summary, key decisions, deployment readiness checklist |
 | **[AGENT_GUIDELINES.md](AGENT_GUIDELINES.md)** | 🤖 Guidelines for AI agents and developers (TDD workflow, coding standards) |
 | **[SUMMARY.md](SUMMARY.md)** | 📋 Project summary, key decisions, deployment readiness checklist |
 | **[META-PROMPTS.md](META-PROMPTS.md)** | 🧠 Reusable meta-prompting patterns for future TDD IaC projects |
@@ -365,9 +383,10 @@ This project includes comprehensive documentation:
 
 ### Reading Order for New Contributors
 
-1. **Start here** (README.md) - Understand project goals and setup
-2. **ARCHITECTURE.md** - Deep dive into system design and AWS services
-3. **AGENT_GUIDELINES.md** - Learn development workflow and standards
+3. **EXPERIMENT.md** - Understand the experimental methodology and observations
+4. **AGENT_GUIDELINES.md** - Learn development workflow and standards
+5. **META-PROMPTS.md** - Discover reusable patterns for AI-assisted development
+6. **SUMMARY.md** - Review project completion and key learnings
 4. **META-PROMPTS.md** - Discover reusable patterns for AI-assisted development
 5. **SUMMARY.md** - Review project completion and key learnings
 
@@ -400,5 +419,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Built with ❤️ using AWS CDK, Python, and strict Test-Driven Development**  
+**Developed in partnership with Amazon Q Developer for Issues #1-#14**
 **Developed in partnership with Q Developer for Issues #1-#13**
