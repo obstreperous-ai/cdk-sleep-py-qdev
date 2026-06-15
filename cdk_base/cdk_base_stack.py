@@ -364,9 +364,8 @@ class CdkBaseStack(Stack):
         
         # Issue #10: Enhanced with specific error types
         # This catches validation errors and other Lambda failures
-        # Catches specific Lambda errors plus generic fallback
-            lambda_error_handler_chain,
         invoke_audio_processor.add_catch(
+            lambda_error_handler_chain,
             errors=["States.ALL"],
         )
         
@@ -416,11 +415,9 @@ class CdkBaseStack(Stack):
         )
         
         polly_task.add_catch(
-            polly_error_handler_chain,
-        polly_task.add_catch(
             errors=["States.ALL"],
                    "DynamoDB.ConditionalCheckFailedException", "States.TaskFailed", "States.ALL"],
-        )
+            handler=polly_error_handler_chain
         
         # Chain the success path: Polly → update status → publish notification
         success_chain = polly_task.next(update_status_completed).next(publish_success)

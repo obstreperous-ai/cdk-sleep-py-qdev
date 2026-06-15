@@ -291,6 +291,28 @@ def update_dynamodb_with_output(audio_id: str, output_location: str, file_size: 
     Enhanced with real audio processing logic - downloads from S3, processes,
     uploads to output bucket, and updates DynamoDB with metadata.
     
+    Args:
+        event: Input event from Step Functions containing S3 event details
+        context: Lambda context object
+        
+    Returns:
+        Dict containing processing result with audioId, status, output location, and metadata
+    
+    Raises:
+        ValidationError: If input validation fails
+        Exception: For other processing errors
+    """
+    # Extract request ID from Lambda context for correlation
+    request_id = context.request_id if context else "local-test"
+    start_time = time.time()
+    
+    try:
+    """
+    Lambda handler for audio processing with input validation.
+    Enhanced with structured logging and X-Ray compatible tracing.
+    Enhanced with real audio processing logic - downloads from S3, processes,
+    uploads to output bucket, and updates DynamoDB with metadata.
+    
         event: Input event from Step Functions containing S3 event details
         context: Lambda context object
         
@@ -317,7 +339,10 @@ def update_dynamodb_with_output(audio_id: str, output_location: str, file_size: 
         validated_data = validate_s3_event(event)
         bucket_name = validated_data["bucket"]
         audio_id = validated_data["key"]
+        processing_time = time.time() - start_time
         
+            "INFO",
+            "File extension validation successful",
         # Structured log: Validation successful
         log_structured(
             "INFO",
