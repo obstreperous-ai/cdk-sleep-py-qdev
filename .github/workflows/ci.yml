@@ -39,8 +39,19 @@ jobs:
 
     - name: Run pytest
       run: |
-        pytest tests/ -v --cov=cdk_base --cov-report=term-missing
+        pytest tests/ -v --cov=cdk_base --cov=lambda --cov-report=term-missing --cov-report=json
 
+    - name: Generate coverage badge
+      if: matrix.python-version == '3.12' && github.ref == 'refs/heads/main'
+      run: |
+        COVERAGE=$(python -c "import json; print(json.load(open('coverage.json'))['totals']['percent_covered_display'])")
+        echo "Coverage: ${COVERAGE}%"
+        echo "COVERAGE=${COVERAGE}" >> $GITHUB_ENV
+        
+    - name: Display coverage summary
+      run: |
+        echo "Code coverage report generated successfully"
+        
     - name: Run CDK synth
       run: |
         echo "Testing default environment (dev)"
